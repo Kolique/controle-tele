@@ -23,7 +23,7 @@ def check_data(df):
     # Vérifier la présence des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude']
     if not all(col in df_with_anomalies.columns for col in required_columns):
-        missing_columns = [col for col in required_anomalies if col not in df_with_anomalies.columns]
+        missing_columns = [col for col in required_columns if col not in df_with_anomalies.columns]
         st.error(f"Votre fichier ne contient pas toutes les colonnes requises. Colonnes manquantes : {', '.join(missing_columns)}")
         st.stop()
     
@@ -56,9 +56,9 @@ def check_data(df):
     kamstrup_condition = (df_with_anomalies['Marque'] == 'KAMSTRUP') & (df_with_anomalies['Numéro de compteur'].astype(str).str.len() != 8)
     df_with_anomalies.loc[kamstrup_condition, 'Anomalie'] += "Marque KAMSTRUP : 'Numéro de compteur' n'a pas 8 caractères; "
     
-    # 9. Contrôle de la longueur des caractères pour la marque Sappel
-    sappel_condition = (df_with_anomalies['Marque'].isin(['Sappel(C)', 'Sappel(H)'])) & (df_with_anomalies['Numéro de tête'].astype(str).str.len() != 16)
-    df_with_anomalies.loc[sappel_condition, 'Anomalie'] += "Marque Sappel(C) ou Sappel(H) : 'Numéro de tête' n'a pas 16 caractères; "
+    # 9. Contrôle de la longueur des caractères pour la marque Sappel(C) ou Sappel(H)
+    sappel_condition = (df_with_anomalies['Marque'].isin(['SAPPEL (C)', 'SAPPEL (H)'])) & (df_with_anomalies['Numéro de tête'].astype(str).str.len() != 16)
+    df_with_anomalies.loc[sappel_condition, 'Anomalie'] += "Marque SAPPEL (C) ou SAPPEL (H) : 'Numéro de tête' n'a pas 16 caractères; "
 
 
     # Nettoyer la colonne d'anomalies
