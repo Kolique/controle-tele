@@ -32,6 +32,7 @@ def get_csv_delimiter(file):
 
 def check_data(df):
     df_with_anomalies = df.copy()
+    anomaly_counter = {}
 
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité']
     if not all(col in df_with_anomalies.columns for col in required_columns):
@@ -50,83 +51,74 @@ def check_data(df):
         radio = row['Protocole Radio']
         traite = str(row['Traité'])
 
-        # Champs vides
+        def log_anomaly(label):
+            df_with_anomalies.at[idx, 'Anomalie'] += label + '; '
+            anomaly_counter[label] = anomaly_counter.get(label, 0) + 1
+
         for col in ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête']:
             if pd.isna(row[col]) or str(row[col]).strip() == '':
-                df_with_anomalies.at[idx, 'Anomalie'] += f"Colonne '{col}' vide; "
+                log_anomaly(f"Colonne '{col}' vide")
 
-        # Latitude et Longitude
         try:
             lat = float(row['Latitude'])
             lon = float(row['Longitude'])
             if lat == 0:
-                df_with_anomalies.at[idx, 'Anomalie'] += "Latitude = 0; "
+                log_anomaly("Latitude = 0")
             if lon == 0:
-                df_with_anomalies.at[idx, 'Anomalie'] += "Longitude = 0; "
+                log_anomaly("Longitude = 0")
             if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Latitude ou Longitude invalide; "
+                log_anomaly("Latitude ou Longitude invalide")
         except:
-            df_with_anomalies.at[idx, 'Anomalie'] += "Latitude ou Longitude non numérique; "
+            log_anomaly("Latitude ou Longitude non numérique")
 
-        # Format SAPPEL compteur
         if marque in ["SAPPEL (C)", "SAPPEL(C)", "SAPPEL (H)"]:
             if not re.match(r'^[A-Z]{1}\d{2}[A-Z]{2}\d{6}$', compteur):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Format compteur SAPPEL invalide; "
-
-        # Numéro de tête longueur
-        if marque in ["SAPPEL (C)", "SAPPEL(C)", "SAPPEL (H)"]:
+                log_anomaly("Format compteur SAPPEL invalide")
             if len(tete) != 16:
-                df_with_anomalies.at[idx, 'Anomalie'] += "Numéro de tête != 16 caractères; "
+                log_anomaly("Numéro de tête != 16 caractères")
 
-        # FP2E
         if marque in ["SAPPEL (C)", "SAPPEL (H)", "ITRON"] and len(compteur) >= 5:
             if marque == "SAPPEL (C)" and not compteur.startswith("C"):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Compteur doit commencer par C pour SAPPEL (C); "
+                log_anomaly("Compteur doit commencer par C pour SAPPEL (C)")
             if marque == "SAPPEL (H)" and not compteur.startswith("H"):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Compteur doit commencer par H pour SAPPEL (H); "
-            if marque == "ITRON" and compteur[0] not in ["C", "H"]:
-                df_with_anomalies.at[idx, 'Anomalie'] += "ITRON doit commencer par C ou H; "
+                log_anomaly("Compteur doit commencer par H pour SAPPEL (H)")
+            if marque == "ITRON" and compteur[0] not in ["I", "D"]:
+                log_anomaly("ITRON : Numéro de compteur doit commencer par I ou D")
             if not compteur[1:3].isdigit() or compteur[1:3] != annee[-2:]:
-                df_with_anomalies.at[idx, 'Anomalie'] += "Année de fabrication non cohérente; "
+                log_anomaly("Année de fabrication non cohérente")
             try:
                 lettre_diam = compteur[4]
                 lettres_attendues = diametre_lettre.get(int(diam), [])
                 if lettre_diam not in lettres_attendues:
-                    df_with_anomalies.at[idx, 'Anomalie'] += f"Lettre '{lettre_diam}' ne correspond pas au diamètre {diam}; "
+                    log_anomaly(f"Lettre '{lettre_diam}' ne correspond pas au diamètre {diam}")
             except:
-                df_with_anomalies.at[idx, 'Anomalie'] += "Diamètre non valide; "
+                log_anomaly("Diamètre non valide")
 
-        # ITRON num tête
         if marque == "ITRON":
-            if not tete.startswith("I") and not tete.startswith("D"):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Tête ITRON doit commencer par I ou D; "
-            if not (len(tete) == 8 and tete.isdigit()):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Tête ITRON doit avoir 8 chiffres; "
+            if len(tete) != 6:
+                log_anomaly("Tête ITRON doit faire 6 caractères")
 
-        # KAMSTRUP
         if marque == "KAMSTRUP":
             if compteur != tete:
-                df_with_anomalies.at[idx, 'Anomalie'] += "KAMSTRUP : compteur différent de tête; "
+                log_anomaly("KAMSTRUP : compteur différent de tête")
             if not compteur.isdigit() or not tete.isdigit():
-                df_with_anomalies.at[idx, 'Anomalie'] += "KAMSTRUP : compteur ou tête contient des lettres; "
+                log_anomaly("KAMSTRUP : compteur ou tête contient des lettres")
 
-        # Préfixe compteur impose la marque
         if compteur.startswith("C") and marque not in ["SAPPEL (C)", "SAPPEL(C)"]:
-            df_with_anomalies.at[idx, 'Anomalie'] += "Compteur commence par C mais marque incorrecte; "
+            log_anomaly("Compteur commence par C mais marque incorrecte")
         if compteur.startswith("H") and marque != "SAPPEL (H)":
-            df_with_anomalies.at[idx, 'Anomalie'] += "Compteur commence par H mais marque incorrecte; "
+            log_anomaly("Compteur commence par H mais marque incorrecte")
 
-        # Protocole Radio selon Traité
         if traite.startswith("903") or traite.startswith("863"):
             if radio != "LRA":
-                df_with_anomalies.at[idx, 'Anomalie'] += "Traité commence par 903/863 mais radio != LRA; "
+                log_anomaly("Traité commence par 903/863 mais radio != LRA")
         else:
             if radio != "SGX":
-                df_with_anomalies.at[idx, 'Anomalie'] += "Traité ne commence pas par 903/863 mais radio != SGX; "
+                log_anomaly("Traité ne commence pas par 903/863 mais radio != SGX")
 
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(';')
     anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != '']
-    return anomalies_df
+    return anomalies_df, anomaly_counter
 
 # --- Interface Streamlit ---
 st.title("Contrôle des données de Télérelève")
@@ -156,11 +148,15 @@ if uploaded_file is not None:
 
     if st.button("Lancer les contrôles"):
         st.write("Contrôles en cours...")
-        anomalies_df = check_data(df)
+        anomalies_df, anomaly_counter = check_data(df)
 
         if not anomalies_df.empty:
             st.error("Anomalies détectées !")
             st.dataframe(anomalies_df)
+
+            st.subheader("Récapitulatif des anomalies")
+            summary_df = pd.DataFrame(list(anomaly_counter.items()), columns=["Type d'anomalie", "Nombre de cas"])
+            st.dataframe(summary_df)
 
             if file_extension == 'csv':
                 csv_file = anomalies_df.to_csv(index=False, sep=delimiter).encode('utf-8')
