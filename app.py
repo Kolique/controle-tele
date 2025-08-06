@@ -44,7 +44,7 @@ def check_data(df):
     # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité']
     if not all(col in df_with_anomalies.columns for col in required_columns):
-        missing = [col for col in required_with_anomalies.columns if col not in df_with_anomalies.columns]
+        missing = [col for col in required_columns if col not in df_with_anomalies.columns]
         st.error(f"Colonnes manquantes : {', '.join(missing)}")
         st.stop()
 
@@ -65,9 +65,16 @@ def check_data(df):
             anomaly_counter[label] = anomaly_counter.get(label, 0) + 1
 
         # Vérification des colonnes vides pour les champs essentiels
-        for col in ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête']:
+        # 'Numéro de tête' est maintenant géré spécifiquement pour KAMSTRUP plus bas.
+        for col in ['Protocole Radio', 'Marque', 'Numéro de compteur']:
             if pd.isna(row[col]) or str(row[col]).strip() == '':
                 log_anomaly(f"Colonne '{col}' vide")
+
+        # Règle spécifique pour 'Numéro de tête' : ne pas considérer vide comme anomalie pour KAMSTRUP
+        if marque != "KAMSTRUP":
+            if pd.isna(row['Numéro de tête']) or str(row['Numéro de tête']).strip() == '':
+                log_anomaly("Colonne 'Numéro de tête' vide")
+
 
         # Vérification de la Latitude et Longitude
         try:
@@ -98,10 +105,6 @@ def check_data(df):
             if marque == "ITRON" and compteur[0] not in ["I", "D"]:
                 log_anomaly("ITRON : Numéro de compteur doit commencer par I ou D")
             
-            # La règle de cohérence de l'année de fabrication a été supprimée comme demandé.
-            # if not compteur[1:3].isdigit() or compteur[1:3] != annee[-2:]:
-            #     log_anomaly("Année de fabrication non cohérente")
-            
             try:
                 # Assurez-vous que 'diam' est un entier avant de l'utiliser comme clé
                 if pd.notna(diam) and isinstance(diam, (int, float)):
@@ -114,12 +117,14 @@ def check_data(df):
             except (IndexError, ValueError): # Gérer les erreurs si compteur[4] n'existe pas ou diam n'est pas un nombre
                 log_anomaly("Diamètre non valide ou format de compteur incorrect pour la lettre de diamètre")
 
-        # Règles spécifiques pour ITRON
+        # Règles spécifiques pour ITRON (modifiées pour 8 caractères)
         if marque == "ITRON":
-            if len(tete) != 6:
-                log_anomaly("Tête ITRON doit faire 6 caractères")
+            # Si le numéro de tête n'est pas vide, vérifier sa longueur
+            if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
+                if len(tete) != 8:
+                    log_anomaly("ITRON : Numéro de tête doit faire exactement 8 caractères")
 
-        # Nouvelle règle pour KAMSTRUP
+        # Nouvelle règle pour KAMSTRUP (logique de vide déjà gérée, juste la comparaison si présent)
         if marque == "KAMSTRUP":
             # Vérifier si 'Numéro de tête' est présent (non vide ou NaN)
             if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
@@ -129,7 +134,8 @@ def check_data(df):
                 # Vérifier si compteur ou tête contiennent des lettres (si présents et non vides)
                 if not compteur.isdigit() or not tete.isdigit():
                     log_anomaly("KAMSTRUP : Numéro de compteur ou Numéro de tête contient des lettres")
-            # Si le numéro de tête est manquant, ce n'est pas une anomalie pour KAMSTRUP, donc pas de log_anomaly ici.
+            # Si le numéro de tête est manquant, ce n'est pas une anomalie pour KAMSTRUP, cela est géré par la
+            # condition 'if marque != "KAMSTRUP":' pour la vérification générale de colonne vide.
 
 
         # Vérification de la marque en fonction du début du numéro de compteur
