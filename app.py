@@ -73,14 +73,10 @@ def check_data(df):
             if not re.match(r'^[A-Z]{1}\d{2}[A-Z]{2}\d{6}$', compteur):
                 df_with_anomalies.at[idx, 'Anomalie'] += "Format compteur SAPPEL invalide; "
 
-        # Numéro de tête longueur et préfixe
+        # Numéro de tête longueur
         if marque in ["SAPPEL (C)", "SAPPEL(C)", "SAPPEL (H)"]:
             if len(tete) != 16:
                 df_with_anomalies.at[idx, 'Anomalie'] += "Numéro de tête != 16 caractères; "
-            if marque in ["SAPPEL (C)", "SAPPEL(C)"] and not tete.startswith("C"):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Tête ne commence pas par C pour SAPPEL (C); "
-            if marque == "SAPPEL (H)" and not tete.startswith("H"):
-                df_with_anomalies.at[idx, 'Anomalie'] += "Tête ne commence pas par H pour SAPPEL (H); "
 
         # FP2E
         if marque in ["SAPPEL (C)", "SAPPEL (H)", "ITRON"] and len(compteur) >= 5:
@@ -131,46 +127,3 @@ def check_data(df):
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(';')
     anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != '']
     return anomalies_df
-
-# --- Interface Streamlit ---
-st.title("Contrôle des données de Télérelève")
-st.markdown("Veuillez téléverser votre fichier pour lancer les contrôles.")
-
-uploaded_file = st.file_uploader("Choisissez un fichier", type=['csv', 'xlsx'])
-
-if uploaded_file is not None:
-    st.success("Fichier chargé avec succès !")
-    try:
-        ext = uploaded_file.name.split('.')[-1]
-        if ext == 'csv':
-            delimiter = get_csv_delimiter(uploaded_file)
-            df = pd.read_csv(uploaded_file, sep=delimiter)
-        elif ext == 'xlsx':
-            df = pd.read_excel(uploaded_file)
-        else:
-            st.error("Format de fichier non pris en charge.")
-            st.stop()
-    except Exception as e:
-        st.error(f"Erreur de lecture : {e}")
-        st.stop()
-
-    st.subheader("Aperçu du fichier")
-    st.dataframe(df.head())
-
-    if st.button("Lancer les contrôles"):
-        anomalies_df = check_data(df)
-
-        if not anomalies_df.empty:
-            st.error("Anomalies détectées !")
-            st.dataframe(anomalies_df)
-
-            if ext == 'csv':
-                csv_file = anomalies_df.to_csv(index=False, sep=delimiter).encode('utf-8')
-                st.download_button("Télécharger les anomalies (CSV)", data=csv_file, file_name="anomalies.csv", mime='text/csv')
-            else:
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    anomalies_df.to_excel(writer, index=False)
-                st.download_button("Télécharger les anomalies (Excel)", data=buffer.getvalue(), file_name="anomalies.xlsx", mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        else:
-            st.success("Aucune anomalie détectée !")
