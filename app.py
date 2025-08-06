@@ -6,7 +6,7 @@ import re
 
 # Table de correspondance Diametre -> Lettre pour FP2E
 diametre_lettre = {
-    15: ['A', 'U', 'Y', 'Z'],
+    15: ['A', 'U', 'V'],
     20: ['B'],
     25: ['C'],
     30: ['D'],
