@@ -21,6 +21,9 @@ diametre_lettre = {
 }
 
 def get_csv_delimiter(file):
+    """
+    Détecte automatiquement le délimiteur d'un fichier CSV.
+    """
     try:
         sample = file.read(2048).decode('utf-8')
         dialect = csv.Sniffer().sniff(sample)
@@ -31,34 +34,42 @@ def get_csv_delimiter(file):
         return ','
 
 def check_data(df):
+    """
+    Vérifie les données du DataFrame pour détecter les anomalies.
+    Retourne un DataFrame avec les lignes contenant des anomalies et un dictionnaire de comptage des anomalies.
+    """
     df_with_anomalies = df.copy()
     anomaly_counter = {}
 
+    # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité']
     if not all(col in df_with_anomalies.columns for col in required_columns):
-        missing = [col for col in required_columns if col not in df_with_anomalies.columns]
+        missing = [col for col in required_with_anomalies.columns if col not in df_with_anomalies.columns]
         st.error(f"Colonnes manquantes : {', '.join(missing)}")
         st.stop()
 
     df_with_anomalies['Anomalie'] = ''
 
     for idx, row in df_with_anomalies.iterrows():
-        marque = row['Marque']
+        marque = str(row['Marque']) # Convertir en string pour éviter les problèmes avec pd.isna
         compteur = str(row['Numéro de compteur'])
         tete = str(row['Numéro de tête'])
         annee = str(row['Année de fabrication'])
         diam = row['Diametre']
-        radio = row['Protocole Radio']
+        radio = str(row['Protocole Radio'])
         traite = str(row['Traité'])
 
         def log_anomaly(label):
+            """Ajoute une anomalie à la ligne actuelle et met à jour le compteur."""
             df_with_anomalies.at[idx, 'Anomalie'] += label + '; '
             anomaly_counter[label] = anomaly_counter.get(label, 0) + 1
 
+        # Vérification des colonnes vides pour les champs essentiels
         for col in ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête']:
             if pd.isna(row[col]) or str(row[col]).strip() == '':
                 log_anomaly(f"Colonne '{col}' vide")
 
+        # Vérification de la Latitude et Longitude
         try:
             lat = float(row['Latitude'])
             lon = float(row['Longitude'])
@@ -68,15 +79,17 @@ def check_data(df):
                 log_anomaly("Longitude = 0")
             if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
                 log_anomaly("Latitude ou Longitude invalide")
-        except:
+        except ValueError: # Utiliser ValueError pour les erreurs de conversion
             log_anomaly("Latitude ou Longitude non numérique")
 
+        # Règles spécifiques pour SAPPEL (C), SAPPEL (H)
         if marque in ["SAPPEL (C)", "SAPPEL(C)", "SAPPEL (H)"]:
             if not re.match(r'^[A-Z]{1}\d{2}[A-Z]{2}\d{6}$', compteur):
                 log_anomaly("Format compteur SAPPEL invalide")
             if len(tete) != 16:
                 log_anomaly("Numéro de tête != 16 caractères")
 
+        # Règles pour SAPPEL (C), SAPPEL (H), ITRON
         if marque in ["SAPPEL (C)", "SAPPEL (H)", "ITRON"] and len(compteur) >= 5:
             if marque == "SAPPEL (C)" and not compteur.startswith("C"):
                 log_anomaly("Compteur doit commencer par C pour SAPPEL (C)")
@@ -84,31 +97,48 @@ def check_data(df):
                 log_anomaly("Compteur doit commencer par H pour SAPPEL (H)")
             if marque == "ITRON" and compteur[0] not in ["I", "D"]:
                 log_anomaly("ITRON : Numéro de compteur doit commencer par I ou D")
-            if not compteur[1:3].isdigit() or compteur[1:3] != annee[-2:]:
-                log_anomaly("Année de fabrication non cohérente")
+            
+            # La règle de cohérence de l'année de fabrication a été supprimée comme demandé.
+            # if not compteur[1:3].isdigit() or compteur[1:3] != annee[-2:]:
+            #     log_anomaly("Année de fabrication non cohérente")
+            
             try:
-                lettre_diam = compteur[4]
-                lettres_attendues = diametre_lettre.get(int(diam), [])
-                if lettre_diam not in lettres_attendues:
-                    log_anomaly(f"Lettre '{lettre_diam}' ne correspond pas au diamètre {diam}")
-            except:
-                log_anomaly("Diamètre non valide")
+                # Assurez-vous que 'diam' est un entier avant de l'utiliser comme clé
+                if pd.notna(diam) and isinstance(diam, (int, float)):
+                    lettre_diam = compteur[4]
+                    lettres_attendues = diametre_lettre.get(int(diam), [])
+                    if lettre_diam not in lettres_attendues:
+                        log_anomaly(f"Lettre '{lettre_diam}' ne correspond pas au diamètre {int(diam)}")
+                else:
+                    log_anomaly("Diamètre non valide ou manquant")
+            except (IndexError, ValueError): # Gérer les erreurs si compteur[4] n'existe pas ou diam n'est pas un nombre
+                log_anomaly("Diamètre non valide ou format de compteur incorrect pour la lettre de diamètre")
 
+        # Règles spécifiques pour ITRON
         if marque == "ITRON":
             if len(tete) != 6:
                 log_anomaly("Tête ITRON doit faire 6 caractères")
 
+        # Nouvelle règle pour KAMSTRUP
         if marque == "KAMSTRUP":
-            if compteur != tete:
-                log_anomaly("KAMSTRUP : compteur différent de tête")
-            if not compteur.isdigit() or not tete.isdigit():
-                log_anomaly("KAMSTRUP : compteur ou tête contient des lettres")
+            # Vérifier si 'Numéro de tête' est présent (non vide ou NaN)
+            if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
+                # Si le numéro de tête est présent, vérifier la correspondance avec le numéro de compteur
+                if compteur != tete:
+                    log_anomaly("KAMSTRUP : Numéro de compteur différent du Numéro de tête")
+                # Vérifier si compteur ou tête contiennent des lettres (si présents et non vides)
+                if not compteur.isdigit() or not tete.isdigit():
+                    log_anomaly("KAMSTRUP : Numéro de compteur ou Numéro de tête contient des lettres")
+            # Si le numéro de tête est manquant, ce n'est pas une anomalie pour KAMSTRUP, donc pas de log_anomaly ici.
 
+
+        # Vérification de la marque en fonction du début du numéro de compteur
         if compteur.startswith("C") and marque not in ["SAPPEL (C)", "SAPPEL(C)"]:
             log_anomaly("Compteur commence par C mais marque incorrecte")
         if compteur.startswith("H") and marque != "SAPPEL (H)":
             log_anomaly("Compteur commence par H mais marque incorrecte")
 
+        # Vérification du protocole Radio en fonction du champ 'Traité'
         if traite.startswith("903") or traite.startswith("863"):
             if radio != "LRA":
                 log_anomaly("Traité commence par 903/863 mais radio != LRA")
