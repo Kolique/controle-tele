@@ -127,3 +127,60 @@ def check_data(df):
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(';')
     anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != '']
     return anomalies_df
+
+# --- Interface Streamlit ---
+st.title("Contrôle des données de Télérelève")
+st.markdown("Veuillez téléverser votre fichier pour lancer les contrôles.")
+
+uploaded_file = st.file_uploader("Choisissez un fichier", type=['csv', 'xlsx'])
+
+if uploaded_file is not None:
+    st.success("Fichier chargé avec succès !")
+
+    try:
+        file_extension = uploaded_file.name.split('.')[-1]
+        if file_extension == 'csv':
+            delimiter = get_csv_delimiter(uploaded_file)
+            df = pd.read_csv(uploaded_file, sep=delimiter)
+        elif file_extension == 'xlsx':
+            df = pd.read_excel(uploaded_file)
+        else:
+            st.error("Format de fichier non pris en charge. Veuillez utiliser un fichier .csv ou .xlsx.")
+            st.stop()
+    except Exception as e:
+        st.error(f"Erreur de lecture du fichier : {e}")
+        st.stop()
+
+    st.subheader("Aperçu des 5 premières lignes")
+    st.dataframe(df.head())
+
+    if st.button("Lancer les contrôles"):
+        st.write("Contrôles en cours...")
+        anomalies_df = check_data(df)
+
+        if not anomalies_df.empty:
+            st.error("Anomalies détectées !")
+            st.dataframe(anomalies_df)
+
+            if file_extension == 'csv':
+                csv_file = anomalies_df.to_csv(index=False, sep=delimiter).encode('utf-8')
+                st.download_button(
+                    label="Télécharger les anomalies en CSV",
+                    data=csv_file,
+                    file_name='anomalies_telerelève.csv',
+                    mime='text/csv',
+                )
+            elif file_extension == 'xlsx':
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    anomalies_df.to_excel(writer, index=False, sheet_name='Anomalies')
+                excel_buffer.seek(0)
+
+                st.download_button(
+                    label="Télécharger les anomalies en Excel",
+                    data=excel_buffer,
+                    file_name='anomalies_telerelève.xlsx',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                )
+        else:
+            st.success("Aucune anomalie détectée ! Les données sont conformes.")
