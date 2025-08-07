@@ -5,7 +5,10 @@ import csv
 import re
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
+from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl import load_workbook
+from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
+from openpyxl.utils import get_column_letter
 
 # Table de correspondance Diametre -> Lettre pour FP2E
 diametre_lettre = {
@@ -137,11 +140,12 @@ def check_data(df):
     fp2e_anomalies = df_with_anomalies[sappel_fp2e_condition].apply(lambda row: not check_fp2e(row), axis=1)
     df_with_anomalies.loc[sappel_fp2e_condition & fp2e_anomalies, 'Anomalie'] += 'SAPPEL: non conforme FP2E / '
 
-
     # Nettoyage de la colonne 'Anomalie'
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(' /')
     
     anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != ''].copy()
+    anomalies_df.reset_index(inplace=True)
+    anomalies_df.rename(columns={'index': 'Index original'}, inplace=True)
     
     # Comptage des anomalies pour le résumé
     anomaly_counter = anomalies_df['Anomalie'].str.split(' / ').explode().value_counts()
@@ -228,12 +232,42 @@ if uploaded_file is not None:
                 )
             elif file_extension == 'xlsx':
                 excel_buffer = io.BytesIO()
-                anomalies_df.to_excel(excel_buffer, index=False, sheet_name='Anomalies', engine='openpyxl')
-                excel_buffer.seek(0)
                 
-                wb = load_workbook(excel_buffer)
-                ws = wb.active
+                # Création d'un classeur Excel avec le DataFrame d'anomalies
+                wb = Workbook()
+                ws_anomalies = wb.active
+                ws_anomalies.title = "Anomalies"
                 
+                # Écriture du DataFrame des anomalies dans la première feuille
+                for r_idx, row in enumerate(dataframe_to_rows(anomalies_df, index=False, header=True)):
+                    ws_anomalies.append(row)
+
+                # Création d'une nouvelle feuille pour le résumé
+                ws_resume = wb.create_sheet(title="Résumé des anomalies")
+
+                # Création du DataFrame de résumé pour l'exportation
+                if not anomaly_counter.empty:
+                    summary_df = pd.DataFrame(anomaly_counter).reset_index()
+                    summary_df.columns = ["Type d'anomalie", "Nombre de cas"]
+
+                    # Ajout des données de résumé à la deuxième feuille
+                    for r_idx, row in enumerate(dataframe_to_rows(summary_df, index=False, header=True)):
+                        ws_resume.append(row)
+                        
+                    # Dictionnaire pour trouver l'index de la première anomalie
+                    first_anomaly_index = {
+                        anomaly_type: anomalies_df.index[anomalies_df['Anomalie'].str.contains(anomaly_type, regex=False)].min()
+                        for anomaly_type in summary_df["Type d'anomalie"]
+                    }
+
+                    # Mise en forme de la feuille de résumé et ajout des liens
+                    for cell in ws_resume['A']:
+                        if cell.value in first_anomaly_index:
+                            target_row = anomalies_df.index.get_loc(first_anomaly_index[cell.value]) + 2
+                            cell.hyperlink = f"#'Anomalies'!A{target_row}"
+                            cell.style = "Hyperlink"
+                    
+                # Mise en forme de la feuille des anomalies et mise en couleur
                 red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
 
                 for i, row in enumerate(anomalies_df.iterrows()):
@@ -245,11 +279,12 @@ if uploaded_file is not None:
                             for col_name in columns_to_highlight:
                                 try:
                                     col_index = list(anomalies_df.columns).index(col_name) + 1
-                                    cell = ws.cell(row=i + 2, column=col_index)
+                                    cell = ws_anomalies.cell(row=i + 2, column=col_index)
                                     cell.fill = red_fill
                                 except ValueError:
                                     pass
-                                
+
+                # Enregistrement du classeur dans le buffer
                 excel_buffer_styled = io.BytesIO()
                 wb.save(excel_buffer_styled)
                 excel_buffer_styled.seek(0)
