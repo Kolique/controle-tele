@@ -3,6 +3,9 @@ import pandas as pd
 import io
 import csv
 import re
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
+from openpyxl import load_workbook
 
 # Table de correspondance Diametre -> Lettre pour FP2E
 diametre_lettre = {
@@ -12,7 +15,7 @@ diametre_lettre = {
     30: ['D'],
     40: ['E'],
     50: ['F'],
-    60: ['G'],
+    60: ['G'], # Valeur G = 60 et G = 65, comme indiqué précédemment
     65: ['G'],
     80: ['H'],
     100: ['I'],
@@ -51,7 +54,7 @@ def check_data(df):
     df_with_anomalies['Anomalie'] = ''
 
     for idx, row in df_with_anomalies.iterrows():
-        marque = str(row['Marque']) # Convertir en string pour éviter les problèmes avec pd.isna
+        marque = str(row['Marque'])
         compteur = str(row['Numéro de compteur'])
         tete = str(row['Numéro de tête'])
         annee = str(row['Année de fabrication'])
@@ -65,7 +68,6 @@ def check_data(df):
             anomaly_counter[label] = anomaly_counter.get(label, 0) + 1
 
         # Vérification des colonnes vides pour les champs essentiels
-        # 'Numéro de tête' est maintenant géré spécifiquement pour KAMSTRUP plus bas.
         for col in ['Protocole Radio', 'Marque', 'Numéro de compteur']:
             if pd.isna(row[col]) or str(row[col]).strip() == '':
                 log_anomaly(f"Champ '{col}' manquant")
@@ -74,7 +76,6 @@ def check_data(df):
         if marque != "KAMSTRUP":
             if pd.isna(row['Numéro de tête']) or str(row['Numéro de tête']).strip() == '':
                 log_anomaly("Champ 'Numéro de tête' manquant")
-
 
         # Vérification de la Latitude et Longitude
         try:
@@ -86,7 +87,7 @@ def check_data(df):
                 log_anomaly("Longitude à zéro")
             if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
                 log_anomaly("Coordonnées GPS invalides")
-        except ValueError: # Utiliser ValueError pour les erreurs de conversion
+        except ValueError:
             log_anomaly("Coordonnées GPS non numériques")
 
         # Règles spécifiques pour SAPPEL (C), SAPPEL (H)
@@ -106,7 +107,6 @@ def check_data(df):
                 log_anomaly("Numéro de compteur ITRON doit commencer par 'I' ou 'D'")
             
             try:
-                # Assurez-vous que 'diam' est un entier avant de l'utiliser comme clé
                 if pd.notna(diam) and isinstance(diam, (int, float)):
                     lettre_diam = compteur[4]
                     lettres_attendues = diametre_lettre.get(int(diam), [])
@@ -114,29 +114,22 @@ def check_data(df):
                         log_anomaly(f"Lettre de diamètre dans le numéro de compteur incohérente")
                 else:
                     log_anomaly("Diamètre non valide ou manquant")
-            except (IndexError, ValueError): # Gérer les erreurs si compteur[4] n'existe pas ou diam n'est pas un nombre
+            except (IndexError, ValueError):
                 log_anomaly("Diamètre non valide ou format de compteur incorrect pour la lettre de diamètre")
 
         # Règles spécifiques pour ITRON (modifiées pour 8 caractères)
         if marque == "ITRON":
-            # Si le numéro de tête n'est pas vide, vérifier sa longueur
             if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
                 if len(tete) != 8:
                     log_anomaly("Longueur du numéro de tête ITRON incorrecte (doit être 8 caractères)")
 
         # Nouvelle règle pour KAMSTRUP (logique de vide déjà gérée, juste la comparaison si présent)
         if marque == "KAMSTRUP":
-            # Vérifier si 'Numéro de tête' est présent (non vide ou NaN)
             if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
-                # Si le numéro de tête est présent, vérifier la correspondance avec le numéro de compteur
                 if compteur != tete:
                     log_anomaly("Numéro de compteur KAMSTRUP différent du Numéro de tête")
-                # Vérifier si compteur ou tête contiennent des lettres (si présents et non vides)
                 if not compteur.isdigit() or not tete.isdigit():
                     log_anomaly("Numéro de compteur ou de tête KAMSTRUP contient des lettres")
-            # Si le numéro de tête est manquant, ce n'est pas une anomalie pour KAMSTRUP, cela est géré par la
-            # condition 'if marque != "KAMSTRUP":' pour la vérification générale de colonne vide.
-
 
         # Vérification de la marque en fonction du début du numéro de compteur
         if compteur.startswith("C") and marque not in ["SAPPEL (C)", "SAPPEL(C)"]:
@@ -155,6 +148,15 @@ def check_data(df):
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(';')
     anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != '']
     return anomalies_df, anomaly_counter
+
+def afficher_resume_anomalies(anomaly_counter):
+    """
+    Affiche un résumé des anomalies.
+    """
+    if anomaly_counter:
+        summary_df = pd.DataFrame(list(anomaly_counter.items()), columns=["Type d'anomalie", "Nombre de cas"])
+        st.subheader("Récapitulatif des anomalies")
+        st.dataframe(summary_df)
 
 # --- Interface Streamlit ---
 st.title("Contrôle des données de Télérelève")
@@ -189,10 +191,34 @@ if uploaded_file is not None:
         if not anomalies_df.empty:
             st.error("Anomalies détectées !")
             st.dataframe(anomalies_df)
-
-            st.subheader("Récapitulatif des anomalies")
-            summary_df = pd.DataFrame(list(anomaly_counter.items()), columns=["Type d'anomalie", "Nombre de cas"])
-            st.dataframe(summary_df)
+            afficher_resume_anomalies(anomaly_counter)
+            
+            # Dictionnaire pour mapper les anomalies aux colonnes
+            anomaly_columns_map = {
+                "Champ 'Protocole Radio' manquant": ['Protocole Radio'],
+                "Champ 'Marque' manquant": ['Marque'],
+                "Champ 'Numéro de compteur' manquant": ['Numéro de compteur'],
+                "Champ 'Numéro de tête' manquant": ['Numéro de tête'],
+                "Latitude à zéro": ['Latitude'],
+                "Longitude à zéro": ['Longitude'],
+                "Coordonnées GPS invalides": ['Latitude', 'Longitude'],
+                "Coordonnées GPS non numériques": ['Latitude', 'Longitude'],
+                "Format du numéro de compteur SAPPEL incorrect": ['Numéro de compteur'],
+                "Longueur du numéro de tête SAPPEL incorrecte (doit être 16 caractères)": ['Numéro de tête'],
+                "Numéro de compteur SAPPEL (C) ne commence pas par 'C'": ['Numéro de compteur'],
+                "Numéro de compteur SAPPEL (H) ne commence pas par 'H'": ['Numéro de compteur'],
+                "Numéro de compteur ITRON doit commencer par 'I' ou 'D'": ['Numéro de compteur'],
+                "Lettre de diamètre dans le numéro de compteur incohérente": ['Numéro de compteur', 'Diametre'],
+                "Diamètre non valide ou manquant": ['Diametre'],
+                "Diamètre non valide ou format de compteur incorrect pour la lettre de diamètre": ['Numéro de compteur', 'Diametre'],
+                "Longueur du numéro de tête ITRON incorrecte (doit être 8 caractères)": ['Numéro de tête'],
+                "Numéro de compteur KAMSTRUP différent du Numéro de tête": ['Numéro de compteur', 'Numéro de tête'],
+                "Numéro de compteur ou de tête KAMSTRUP contient des lettres": ['Numéro de compteur', 'Numéro de tête'],
+                "Marque incohérente avec le numéro de compteur (commence par 'C')": ['Marque', 'Numéro de compteur'],
+                "Marque incohérente avec le numéro de compteur (commence par 'H')": ['Marque', 'Numéro de compteur'],
+                "Protocole Radio incohérent avec le champ 'Traité' (doit être LRA)": ['Protocole Radio', 'Traité'],
+                "Protocole Radio incohérent avec le champ 'Traité' (doit être SGX)": ['Protocole Radio', 'Traité']
+            }
 
             if file_extension == 'csv':
                 csv_file = anomalies_df.to_csv(index=False, sep=delimiter).encode('utf-8')
@@ -204,13 +230,34 @@ if uploaded_file is not None:
                 )
             elif file_extension == 'xlsx':
                 excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    anomalies_df.to_excel(writer, index=False, sheet_name='Anomalies')
+                anomalies_df.to_excel(excel_buffer, index=False, sheet_name='Anomalies', engine='openpyxl')
                 excel_buffer.seek(0)
+                
+                wb = load_workbook(excel_buffer)
+                ws = wb.active
+                
+                red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+
+                for i, row in enumerate(anomalies_df.iterrows()):
+                    anomalies = str(row[1]['Anomalie']).split('; ')
+                    for anomaly in anomalies:
+                        if anomaly in anomaly_columns_map:
+                            columns_to_highlight = anomaly_columns_map[anomaly]
+                            for col_name in columns_to_highlight:
+                                try:
+                                    col_index = list(anomalies_df.columns).index(col_name) + 1
+                                    cell = ws.cell(row=i + 2, column=col_index)
+                                    cell.fill = red_fill
+                                except ValueError:
+                                    pass
+                                
+                excel_buffer_styled = io.BytesIO()
+                wb.save(excel_buffer_styled)
+                excel_buffer_styled.seek(0)
 
                 st.download_button(
                     label="Télécharger les anomalies en Excel",
-                    data=excel_buffer,
+                    data=excel_buffer_styled,
                     file_name='anomalies_telerelève.xlsx',
                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 )
