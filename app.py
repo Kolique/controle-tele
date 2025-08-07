@@ -233,41 +233,18 @@ if uploaded_file is not None:
             elif file_extension == 'xlsx':
                 excel_buffer = io.BytesIO()
                 
-                # Création d'un classeur Excel avec le DataFrame d'anomalies
+                # Création d'un classeur Excel
                 wb = Workbook()
+                
+                # Feuille "Anomalies"
                 ws_anomalies = wb.active
                 ws_anomalies.title = "Anomalies"
                 
-                # Écriture du DataFrame des anomalies dans la première feuille
+                # Écriture du DataFrame des anomalies dans la feuille "Anomalies"
                 for r_idx, row in enumerate(dataframe_to_rows(anomalies_df, index=False, header=True)):
                     ws_anomalies.append(row)
 
-                # Création d'une nouvelle feuille pour le résumé
-                ws_resume = wb.create_sheet(title="Résumé des anomalies")
-
-                # Création du DataFrame de résumé pour l'exportation
-                if not anomaly_counter.empty:
-                    summary_df = pd.DataFrame(anomaly_counter).reset_index()
-                    summary_df.columns = ["Type d'anomalie", "Nombre de cas"]
-
-                    # Ajout des données de résumé à la deuxième feuille
-                    for r_idx, row in enumerate(dataframe_to_rows(summary_df, index=False, header=True)):
-                        ws_resume.append(row)
-                        
-                    # Dictionnaire pour trouver l'index de la première anomalie
-                    first_anomaly_index = {
-                        anomaly_type: anomalies_df.index[anomalies_df['Anomalie'].str.contains(anomaly_type, regex=False)].min()
-                        for anomaly_type in summary_df["Type d'anomalie"]
-                    }
-
-                    # Mise en forme de la feuille de résumé et ajout des liens
-                    for cell in ws_resume['A']:
-                        if cell.value in first_anomaly_index:
-                            target_row = anomalies_df.index.get_loc(first_anomaly_index[cell.value]) + 2
-                            cell.hyperlink = f"#'Anomalies'!A{target_row}"
-                            cell.style = "Hyperlink"
-                    
-                # Mise en forme de la feuille des anomalies et mise en couleur
+                # Mise en forme et mise en couleur de la feuille "Anomalies"
                 red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
 
                 for i, row in enumerate(anomalies_df.iterrows()):
@@ -284,6 +261,21 @@ if uploaded_file is not None:
                                 except ValueError:
                                     pass
 
+                # Feuille "Résumé des anomalies"
+                ws_resume = wb.create_sheet(title="Résumé des anomalies")
+                
+                if not anomaly_counter.empty:
+                    summary_df = pd.DataFrame(anomaly_counter).reset_index()
+                    summary_df.columns = ["Type d'anomalie", "Nombre de cas"]
+
+                    # Écriture du résumé dans la feuille "Résumé des anomalies"
+                    for r_idx, row in enumerate(dataframe_to_rows(summary_df, index=False, header=True)):
+                        ws_resume.append(row)
+                    
+                    # Message de suggestion pour filtrer les données
+                    ws_resume.cell(row=len(summary_df) + 3, column=1, value="Pour afficher les anomalies d'un seul type, vous pouvez utiliser la fonction de filtre d'Excel sur la feuille 'Anomalies'.")
+                    ws_resume.cell(row=len(summary_df) + 3, column=1).font = Font(bold=True)
+                
                 # Enregistrement du classeur dans le buffer
                 excel_buffer_styled = io.BytesIO()
                 wb.save(excel_buffer_styled)
