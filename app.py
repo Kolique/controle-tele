@@ -110,7 +110,10 @@ def check_data(df):
     df_with_anomalies.loc[is_kamstrup & (df_with_anomalies['Numéro de compteur'].str.len() != 8), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ 8 caractères / '
     df_with_anomalies.loc[kamstrup_valid & (df_with_anomalies['Numéro de compteur'] != df_with_anomalies['Numéro de tête']), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ Tête / '
     df_with_anomalies.loc[kamstrup_valid & (~df_with_anomalies['Numéro de compteur'].str.isdigit() | ~df_with_anomalies['Numéro de tête'].str.isdigit()), 'Anomalie'] += 'KAMSTRUP: Compteur ou Tête non numérique / '
-    
+    # NOUVELLE RÈGLE : Diamètre pour KAMSTRUP
+    diametre_kamstrup_anomalie = is_kamstrup & (~df_with_anomalies['Diametre'].between(15, 80))
+    df_with_anomalies.loc[diametre_kamstrup_anomalie, 'Anomalie'] += 'KAMSTRUP: Diamètre hors de la plage [15, 80] / '
+
     # SAPPEL
     sappel_valid = is_sappel & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[sappel_valid & (df_with_anomalies['Numéro de tête'].str.len() != 16), 'Anomalie'] += 'SAPPEL: Tête ≠ 16 caractères / '
@@ -228,6 +231,7 @@ if uploaded_file is not None:
                 # Anomalies spécifiques
                 "KAMSTRUP: Compteur ≠ Tête": ['Numéro de compteur', 'Numéro de tête'],
                 "KAMSTRUP: Compteur ou Tête non numérique": ['Numéro de compteur', 'Numéro de tête'],
+                "KAMSTRUP: Diamètre hors de la plage [15, 80]": ['Diametre'],
                 "SAPPEL: Tête ≠ 16 caractères": ['Numéro de tête'],
                 "SAPPEL: Compteur format incorrect": ['Numéro de compteur'],
                 "SAPPEL: Incohérence Marque/Compteur (C)": ['Marque', 'Numéro de compteur'],
@@ -237,6 +241,7 @@ if uploaded_file is not None:
                 "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
                 "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "SAPPEL: non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
+                
             }
 
             if file_extension == 'csv':
