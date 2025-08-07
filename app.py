@@ -52,11 +52,11 @@ def check_data(df):
 
     df_with_anomalies['Anomalie'] = ''
 
-    # Conversion des colonnes pour les analyses
-    df_with_anomalies['Numéro de compteur'] = df_with_anomalies['Numéro de compteur'].astype(str)
-    df_with_anomalies['Numéro de tête'] = df_with_anomalies['Numéro de tête'].astype(str)
-    df_with_anomalies['Marque'] = df_with_anomalies['Marque'].astype(str)
-    df_with_anomalies['Protocole Radio'] = df_with_anomalies['Protocole Radio'].astype(str)
+    # Conversion des colonnes pour les analyses et remplacement des NaN par des chaînes vides
+    df_with_anomalies['Numéro de compteur'] = df_with_anomalies['Numéro de compteur'].astype(str).fillna('')
+    df_with_anomalies['Numéro de tête'] = df_with_anomalies['Numéro de tête'].astype(str).fillna('')
+    df_with_anomalies['Marque'] = df_with_anomalies['Marque'].astype(str).fillna('')
+    df_with_anomalies['Protocole Radio'] = df_with_anomalies['Protocole Radio'].astype(str).fillna('')
 
     # Marqueurs pour les conditions
     is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
@@ -71,14 +71,14 @@ def check_data(df):
     # ------------------------------------------------------------------
     
     # Colonnes manquantes
-    df_with_anomalies.loc[df_with_anomalies['Protocole Radio'].str.lower().isin(['nan', '']), 'Anomalie'] += 'Protocole Radio manquant / '
-    df_with_anomalies.loc[df_with_anomalies['Marque'].str.lower().isin(['nan', '']), 'Anomalie'] += 'Marque manquante / '
-    df_with_anomalies.loc[df_with_anomalies['Numéro de compteur'].str.lower().isin(['nan', '']), 'Anomalie'] += 'Numéro de compteur manquant / '
+    df_with_anomalies.loc[df_with_anomalies['Protocole Radio'].isin(['', 'nan']), 'Anomalie'] += 'Protocole Radio manquant / '
+    df_with_anomalies.loc[df_with_anomalies['Marque'].isin(['', 'nan']), 'Anomalie'] += 'Marque manquante / '
+    df_with_anomalies.loc[df_with_anomalies['Numéro de compteur'].isin(['', 'nan']), 'Anomalie'] += 'Numéro de compteur manquant / '
     df_with_anomalies.loc[df_with_anomalies['Diametre'].isnull(), 'Anomalie'] += 'Diamètre manquant / '
     df_with_anomalies.loc[df_with_anomalies['Année de fabrication'].isnull(), 'Anomalie'] += 'Année de fabrication manquante / '
     
     # Numéro de tête manquant (sauf pour Kamstrup)
-    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].str.lower().isin(['nan', ''])) & (~is_kamstrup)
+    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup)
     df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
     # Coordonnées
@@ -92,19 +92,19 @@ def check_data(df):
     # ------------------------------------------------------------------
     
     # KAMSTRUP
-    kamstrup_valid = is_kamstrup & (df_with_anomalies['Numéro de tête'].str.lower() != 'nan')
+    kamstrup_valid = is_kamstrup & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[kamstrup_valid & (df_with_anomalies['Numéro de compteur'] != df_with_anomalies['Numéro de tête']), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ Tête / '
     df_with_anomalies.loc[kamstrup_valid & (~df_with_anomalies['Numéro de compteur'].str.isdigit() | ~df_with_anomalies['Numéro de tête'].str.isdigit()), 'Anomalie'] += 'KAMSTRUP: Compteur ou Tête non numérique / '
     
     # SAPPEL
-    sappel_valid = is_sappel & (df_with_anomalies['Numéro de tête'].str.lower() != 'nan')
+    sappel_valid = is_sappel & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[sappel_valid & (df_with_anomalies['Numéro de tête'].str.len() != 16), 'Anomalie'] += 'SAPPEL: Tête ≠ 16 caractères / '
     df_with_anomalies.loc[is_sappel & (~df_with_anomalies['Numéro de compteur'].str.match(r'^[A-Z]{1}\d{2}[A-Z]{2}\d{6}$')), 'Anomalie'] += 'SAPPEL: Compteur format incorrect / '
     df_with_anomalies.loc[(is_sappel) & (df_with_anomalies['Numéro de compteur'].str.startswith('C', na=False)) & (df_with_anomalies['Marque'].str.upper() != 'SAPPEL (C)'), 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (C) / '
     df_with_anomalies.loc[(is_sappel) & (df_with_anomalies['Numéro de compteur'].str.startswith('H', na=False)) & (df_with_anomalies['Marque'].str.upper() != 'SAPPEL (H)'), 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (H) / '
     
     # ITRON
-    itron_valid = is_itron & (df_with_anomalies['Numéro de tête'].str.lower() != 'nan')
+    itron_valid = is_itron & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[itron_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
     df_with_anomalies.loc[is_itron & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
 
