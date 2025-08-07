@@ -62,6 +62,11 @@ def check_data(df):
     df_with_anomalies['Protocole Radio'] = df_with_anomalies['Protocole Radio'].astype(str).replace('nan', '', regex=False)
     df_with_anomalies['Traité'] = df_with_anomalies['Traité'].astype(str).replace('nan', '', regex=False)
     df_with_anomalies['Mode de relève'] = df_with_anomalies['Mode de relève'].astype(str).replace('nan', '', regex=False)
+    
+    # Conversion des colonnes Latitude et Longitude en numérique pour éviter le TypeError
+    df_with_anomalies['Latitude'] = pd.to_numeric(df_with_anomalies['Latitude'], errors='coerce')
+    df_with_anomalies['Longitude'] = pd.to_numeric(df_with_anomalies['Longitude'], errors='coerce')
+
 
     # Marqueurs pour les conditions
     is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
@@ -90,6 +95,7 @@ def check_data(df):
     df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
     # Coordonnées
+    # La conversion en numérique ci-dessus résout le TypeError ici
     df_with_anomalies.loc[df_with_anomalies['Latitude'].isnull() | df_with_anomalies['Longitude'].isnull(), 'Anomalie'] += 'Coordonnées GPS non numériques / '
     coord_invalid = ((df_with_anomalies['Latitude'] == 0) | (~df_with_anomalies['Latitude'].between(-90, 90))) | \
                     ((df_with_anomalies['Longitude'] == 0) | (~df_with_anomalies['Longitude'].between(-180, 180)))
