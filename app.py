@@ -15,7 +15,7 @@ diametre_lettre = {
     30: ['D'],
     40: ['E'],
     50: ['F'],
-    60: ['G'], # Valeur G = 60 et G = 65, comme indiqué précédemment
+    60: ['G'], 
     65: ['G'],
     80: ['H'],
     100: ['I'],
@@ -38,11 +38,10 @@ def get_csv_delimiter(file):
 
 def check_data(df):
     """
-    Vérifie les données du DataFrame pour détecter les anomalies.
-    Retourne un DataFrame avec les lignes contenant des anomalies et un dictionnaire de comptage des anomalies.
+    Vérifie les données du DataFrame pour détecter les anomalies en utilisant des opérations vectorisées.
+    Retourne un DataFrame avec les lignes contenant des anomalies.
     """
     df_with_anomalies = df.copy()
-    anomaly_counter = {}
 
     # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité']
@@ -53,108 +52,122 @@ def check_data(df):
 
     df_with_anomalies['Anomalie'] = ''
 
-    for idx, row in df_with_anomalies.iterrows():
-        marque = str(row['Marque'])
-        compteur = str(row['Numéro de compteur'])
-        tete = str(row['Numéro de tête'])
-        annee = str(row['Année de fabrication'])
-        diam = row['Diametre']
-        radio = str(row['Protocole Radio'])
-        traite = str(row['Traité'])
+    # Conversion des colonnes pour les analyses
+    df_with_anomalies['Numéro de compteur'] = df_with_anomalies['Numéro de compteur'].astype(str)
+    df_with_anomalies['Numéro de tête'] = df_with_anomalies['Numéro de tête'].astype(str)
+    
+    is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
+    is_sappel = df_with_anomalies['Marque'].str.upper().isin(['SAPPEL (C)', 'SAPPEL (H)', 'SAPPEL(C)'])
+    is_itron = df_with_anomalies['Marque'].str.upper() == 'ITRON'
 
-        def log_anomaly(label):
-            """Ajoute une anomalie à la ligne actuelle et met à jour le compteur."""
-            df_with_anomalies.at[idx, 'Anomalie'] += label + '; '
-            anomaly_counter[label] = anomaly_counter.get(label, 0) + 1
+    annee_fabrication_num = pd.to_numeric(df_with_anomalies['Année de fabrication'], errors='coerce')
+    
+    # ------------------------------------------------------------------
+    # ANOMALIES GÉNÉRALES
+    # ------------------------------------------------------------------
+    # Colonnes manquantes
+    df_with_anomalies.loc[df_with_anomalies['Protocole Radio'].isnull(), 'Anomalie'] += 'Protocole Radio manquant / '
+    df_with_anomalies.loc[df_with_anomalies['Marque'].isnull(), 'Anomalie'] += 'Marque manquante / '
+    df_with_anomalies.loc[df_with_anomalies['Numéro de compteur'].str.lower() == 'nan', 'Anomalie'] += 'Numéro de compteur manquant / '
+    
+    # Numéro de tête manquant (sauf pour Kamstrup)
+    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].str.lower() == 'nan') & (~is_kamstrup)
+    df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
-        # Vérification des colonnes vides pour les champs essentiels
-        for col in ['Protocole Radio', 'Marque', 'Numéro de compteur']:
-            if pd.isna(row[col]) or str(row[col]).strip() == '':
-                log_anomaly(f"Champ '{col}' manquant")
+    # Coordonnées
+    df_with_anomalies['Latitude'] = pd.to_numeric(df_with_anomalies['Latitude'], errors='coerce')
+    df_with_anomalies['Longitude'] = pd.to_numeric(df_with_anomalies['Longitude'], errors='coerce')
+    coord_invalid = ((df_with_anomalies['Latitude'] == 0) | (~df_with_anomalies['Latitude'].between(-90, 90))) | \
+                    ((df_with_anomalies['Longitude'] == 0) | (~df_with_anomalies['Longitude'].between(-180, 180)))
+    df_with_anomalies.loc[coord_invalid, 'Anomalie'] += 'Coordonnées invalides / '
 
-        # Règle spécifique pour 'Numéro de tête' : ne pas considérer vide comme anomalie pour KAMSTRUP
-        if marque != "KAMSTRUP":
-            if pd.isna(row['Numéro de tête']) or str(row['Numéro de tête']).strip() == '':
-                log_anomaly("Champ 'Numéro de tête' manquant")
+    # Diamètre
+    df_with_anomalies['Diametre'] = pd.to_numeric(df_with_anomalies['Diametre'], errors='coerce')
+    df_with_anomalies.loc[df_with_anomalies['Diametre'].isnull(), 'Anomalie'] += 'Diamètre manquant / '
 
-        # Vérification de la Latitude et Longitude
+    # ------------------------------------------------------------------
+    # ANOMALIES SPÉCIFIQUES AUX MARQUES
+    # ------------------------------------------------------------------
+    
+    # KAMSTRUP
+    kamstrup_condition = is_kamstrup & (df_with_anomalies['Numéro de tête'].str.lower() != 'nan')
+    df_with_anomalies.loc[kamstrup_condition & (df_with_anomalies['Numéro de compteur'] != df_with_anomalies['Numéro de tête']), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ Tête / '
+    df_with_anomalies.loc[kamstrup_condition & (~df_with_anomalies['Numéro de compteur'].str.isdigit() | ~df_with_anomalies['Numéro de tête'].str.isdigit()), 'Anomalie'] += 'KAMSTRUP: Compteur ou Tête non numérique / '
+
+    # SAPPEL
+    sappel_condition_len_tete = is_sappel & (df_with_anomalies['Numéro de tête'].str.lower() != 'nan') & (df_with_anomalies['Numéro de tête'].str.len() != 16)
+    df_with_anomalies.loc[sappel_condition_len_tete, 'Anomalie'] += 'SAPPEL: Tête ≠ 16 caractères / '
+    
+    sappel_condition_compteur = is_sappel & (~df_with_anomalies['Numéro de compteur'].str.match(r'^[A-Z]{1}\d{2}[A-Z]{2}\d{6}$'))
+    df_with_anomalies.loc[sappel_condition_compteur, 'Anomalie'] += 'SAPPEL: Compteur format incorrect / '
+
+    # ITRON
+    itron_condition_len_tete = is_itron & (df_with_anomalies['Numéro de tête'].str.lower() != 'nan') & (df_with_anomalies['Numéro de tête'].str.len() != 8)
+    df_with_anomalies.loc[itron_condition_len_tete, 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
+    itron_condition_compteur = is_itron & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd')))
+    df_with_anomalies.loc[itron_condition_compteur, 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
+
+
+    # RÈGLES BASÉES SUR PLUSIEURS COLONNES
+    
+    # Marque vs Numéro de compteur
+    condition_marque_compteur_c = is_sappel & (df_with_anomalies['Numéro de compteur'].str.startswith('C')) & (df_with_anomalies['Marque'].str.upper() != 'SAPPEL (C)')
+    df_with_anomalies.loc[condition_marque_compteur_c, 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (C) / '
+    
+    condition_marque_compteur_h = is_sappel & (df_with_anomalies['Numéro de compteur'].str.startswith('H')) & (df_with_anomalies['Marque'].str.upper() != 'SAPPEL (H)')
+    df_with_anomalies.loc[condition_marque_compteur_h, 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (H) / '
+
+    # Protocole Radio vs Traité
+    traite_lra = df_with_anomalies['Traité'].str.startswith(('903', '863'))
+    traite_sgx = ~traite_lra
+    
+    condition_radio_lra = traite_lra & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA')
+    df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA pour Traité 903/863 / '
+    
+    condition_radio_sgx = traite_sgx & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX')
+    df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
+
+    # Règle de diamètre FP2E (pour SAPPEL, ITRON)
+    # L'année dans le compteur est l'année à deux chiffres, ex: C23...
+    def check_fp2e_vectorized(row):
         try:
-            lat = float(row['Latitude'])
-            lon = float(row['Longitude'])
-            if lat == 0:
-                log_anomaly("Latitude à zéro")
-            if lon == 0:
-                log_anomaly("Longitude à zéro")
-            if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
-                log_anomaly("Coordonnées GPS invalides")
-        except ValueError:
-            log_anomaly("Coordonnées GPS non numériques")
-
-        # Règles spécifiques pour SAPPEL (C), SAPPEL (H)
-        if marque in ["SAPPEL (C)", "SAPPEL(C)", "SAPPEL (H)"]:
-            if not re.match(r'^[A-Z]{1}\d{2}[A-Z]{2}\d{6}$', compteur):
-                log_anomaly("Format du numéro de compteur SAPPEL incorrect")
-            if len(tete) != 16:
-                log_anomaly("Longueur du numéro de tête SAPPEL incorrecte (doit être 16 caractères)")
-
-        # Règles pour SAPPEL (C), SAPPEL (H), ITRON
-        if marque in ["SAPPEL (C)", "SAPPEL (H)", "ITRON"] and len(compteur) >= 5:
-            if marque == "SAPPEL (C)" and not compteur.startswith("C"):
-                log_anomaly("Numéro de compteur SAPPEL (C) ne commence pas par 'C'")
-            if marque == "SAPPEL (H)" and not compteur.startswith("H"):
-                log_anomaly("Numéro de compteur SAPPEL (H) ne commence pas par 'H'")
-            if marque == "ITRON" and compteur[0] not in ["I", "D"]:
-                log_anomaly("Numéro de compteur ITRON doit commencer par 'I' ou 'D'")
+            compteur = row['Numéro de compteur']
+            annee_compteur = compteur[1:3]
+            annee_fabrication = str(int(row['Année de fabrication'])).zfill(2)[-2:]
+            lettre_diam = compteur[4]
+            diametre = int(row['Diametre'])
             
-            try:
-                if pd.notna(diam) and isinstance(diam, (int, float)):
-                    lettre_diam = compteur[4]
-                    lettres_attendues = diametre_lettre.get(int(diam), [])
-                    if lettre_diam not in lettres_attendues:
-                        log_anomaly(f"Lettre de diamètre dans le numéro de compteur incohérente")
-                else:
-                    log_anomaly("Diamètre non valide ou manquant")
-            except (IndexError, ValueError):
-                log_anomaly("Diamètre non valide ou format de compteur incorrect pour la lettre de diamètre")
+            if annee_compteur != annee_fabrication:
+                return 'Année dans compteur ≠ Année de fabrication'
+            
+            lettres_attendues = diametre_lettre.get(diametre, [])
+            if lettre_diam not in lettres_attendues:
+                return 'Lettre de diamètre incohérente'
+                
+            return None
+        except:
+            return 'Règle FP2E non applicable'
 
-        # Règles spécifiques pour ITRON (modifiées pour 8 caractères)
-        if marque == "ITRON":
-            if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
-                if len(tete) != 8:
-                    log_anomaly("Longueur du numéro de tête ITRON incorrecte (doit être 8 caractères)")
+    fp2e_anomalies = df_with_anomalies[is_sappel | is_itron].apply(check_fp2e_vectorized, axis=1)
+    df_with_anomalies.loc[is_sappel | is_itron, 'Anomalie'] += fp2e_anomalies.fillna('').astype(str).str.replace('None', '')
 
-        # Nouvelle règle pour KAMSTRUP (logique de vide déjà gérée, juste la comparaison si présent)
-        if marque == "KAMSTRUP":
-            if pd.notna(row['Numéro de tête']) and str(row['Numéro de tête']).strip() != '':
-                if compteur != tete:
-                    log_anomaly("Numéro de compteur KAMSTRUP différent du Numéro de tête")
-                if not compteur.isdigit() or not tete.isdigit():
-                    log_anomaly("Numéro de compteur ou de tête KAMSTRUP contient des lettres")
-
-        # Vérification de la marque en fonction du début du numéro de compteur
-        if compteur.startswith("C") and marque not in ["SAPPEL (C)", "SAPPEL(C)"]:
-            log_anomaly("Marque incohérente avec le numéro de compteur (commence par 'C')")
-        if compteur.startswith("H") and marque != "SAPPEL (H)":
-            log_anomaly("Marque incohérente avec le numéro de compteur (commence par 'H')")
-
-        # Vérification du protocole Radio en fonction du champ 'Traité'
-        if traite.startswith("903") or traite.startswith("863"):
-            if radio != "LRA":
-                log_anomaly("Protocole Radio incohérent avec le champ 'Traité' (doit être LRA)")
-        else:
-            if radio != "SGX":
-                log_anomaly("Protocole Radio incohérent avec le champ 'Traité' (doit être SGX)")
-
-    df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(';')
-    anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != '']
+    # Nettoyage de la colonne 'Anomalie'
+    df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip('/')
+    
+    anomalies_df = df_with_anomalies[df_with_anomalies['Anomalie'] != ''].copy()
+    
+    # Comptage des anomalies pour le résumé
+    anomaly_counter = anomalies_df['Anomalie'].str.split(' / ').explode().value_counts()
+    
     return anomalies_df, anomaly_counter
 
 def afficher_resume_anomalies(anomaly_counter):
     """
     Affiche un résumé des anomalies.
     """
-    if anomaly_counter:
-        summary_df = pd.DataFrame(list(anomaly_counter.items()), columns=["Type d'anomalie", "Nombre de cas"])
+    if not anomaly_counter.empty:
+        summary_df = pd.DataFrame(anomaly_counter).reset_index()
+        summary_df.columns = ["Type d'anomalie", "Nombre de cas"]
         st.subheader("Récapitulatif des anomalies")
         st.dataframe(summary_df)
 
@@ -195,29 +208,29 @@ if uploaded_file is not None:
             
             # Dictionnaire pour mapper les anomalies aux colonnes
             anomaly_columns_map = {
-                "Champ 'Protocole Radio' manquant": ['Protocole Radio'],
-                "Champ 'Marque' manquant": ['Marque'],
-                "Champ 'Numéro de compteur' manquant": ['Numéro de compteur'],
-                "Champ 'Numéro de tête' manquant": ['Numéro de tête'],
-                "Latitude à zéro": ['Latitude'],
-                "Longitude à zéro": ['Longitude'],
-                "Coordonnées GPS invalides": ['Latitude', 'Longitude'],
-                "Coordonnées GPS non numériques": ['Latitude', 'Longitude'],
-                "Format du numéro de compteur SAPPEL incorrect": ['Numéro de compteur'],
-                "Longueur du numéro de tête SAPPEL incorrecte (doit être 16 caractères)": ['Numéro de tête'],
-                "Numéro de compteur SAPPEL (C) ne commence pas par 'C'": ['Numéro de compteur'],
-                "Numéro de compteur SAPPEL (H) ne commence pas par 'H'": ['Numéro de compteur'],
-                "Numéro de compteur ITRON doit commencer par 'I' ou 'D'": ['Numéro de compteur'],
-                "Lettre de diamètre dans le numéro de compteur incohérente": ['Numéro de compteur', 'Diametre'],
-                "Diamètre non valide ou manquant": ['Diametre'],
-                "Diamètre non valide ou format de compteur incorrect pour la lettre de diamètre": ['Numéro de compteur', 'Diametre'],
-                "Longueur du numéro de tête ITRON incorrecte (doit être 8 caractères)": ['Numéro de tête'],
-                "Numéro de compteur KAMSTRUP différent du Numéro de tête": ['Numéro de compteur', 'Numéro de tête'],
-                "Numéro de compteur ou de tête KAMSTRUP contient des lettres": ['Numéro de compteur', 'Numéro de tête'],
-                "Marque incohérente avec le numéro de compteur (commence par 'C')": ['Marque', 'Numéro de compteur'],
-                "Marque incohérente avec le numéro de compteur (commence par 'H')": ['Marque', 'Numéro de compteur'],
-                "Protocole Radio incohérent avec le champ 'Traité' (doit être LRA)": ['Protocole Radio', 'Traité'],
-                "Protocole Radio incohérent avec le champ 'Traité' (doit être SGX)": ['Protocole Radio', 'Traité']
+                "Protocole Radio manquant": ['Protocole Radio'],
+                "Marque manquante": ['Marque'],
+                "Numéro de compteur manquant": ['Numéro de compteur'],
+                "Numéro de tête manquant": ['Numéro de tête'],
+                "Coordonnées invalides": ['Latitude', 'Longitude'],
+                "Diamètre manquant": ['Diametre'],
+                
+                # Anomalies spécifiques
+                "KAMSTRUP: Compteur ≠ Tête": ['Numéro de compteur', 'Numéro de tête'],
+                "KAMSTRUP: Compteur ou Tête non numérique": ['Numéro de compteur', 'Numéro de tête'],
+                "SAPPEL: Tête ≠ 16 caractères": ['Numéro de tête'],
+                "SAPPEL: Compteur format incorrect": ['Numéro de compteur'],
+                "ITRON: Tête ≠ 8 caractères": ['Numéro de tête'],
+                "ITRON: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
+                "SAPPEL: Incohérence Marque/Compteur (C)": ['Marque', 'Numéro de compteur'],
+                "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
+                "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
+                "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
+
+                # Anomalies FP2E
+                "Année dans compteur ≠ Année de fabrication": ['Numéro de compteur', 'Année de fabrication'],
+                "Lettre de diamètre incohérente": ['Numéro de compteur', 'Diametre'],
+                "Règle FP2E non applicable": ['Numéro de compteur', 'Année de fabrication', 'Diametre'],
             }
 
             if file_extension == 'csv':
@@ -239,10 +252,12 @@ if uploaded_file is not None:
                 red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
 
                 for i, row in enumerate(anomalies_df.iterrows()):
-                    anomalies = str(row[1]['Anomalie']).split('; ')
+                    anomalies = str(row[1]['Anomalie']).split(' / ')
                     for anomaly in anomalies:
-                        if anomaly in anomaly_columns_map:
-                            columns_to_highlight = anomaly_columns_map[anomaly]
+                        # Nettoyer l'anomalie pour la faire correspondre à la clé du dictionnaire
+                        anomaly_key = anomaly.strip()
+                        if anomaly_key in anomaly_columns_map:
+                            columns_to_highlight = anomaly_columns_map[anomaly_key]
                             for col_name in columns_to_highlight:
                                 try:
                                     col_index = list(anomalies_df.columns).index(col_name) + 1
