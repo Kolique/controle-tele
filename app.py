@@ -15,7 +15,7 @@ diametre_lettre = {
     30: ['D'],
     40: ['E'],
     50: ['F'],
-    60: ['G'], 
+    60: ['G'],
     65: ['G'],
     80: ['H'],
     100: ['I'],
@@ -57,6 +57,7 @@ def check_data(df):
     df_with_anomalies['Numéro de tête'] = df_with_anomalies['Numéro de tête'].astype(str).fillna('')
     df_with_anomalies['Marque'] = df_with_anomalies['Marque'].astype(str).fillna('')
     df_with_anomalies['Protocole Radio'] = df_with_anomalies['Protocole Radio'].astype(str).fillna('')
+    df_with_anomalies['Traité'] = df_with_anomalies['Traité'].astype(str).fillna('')
 
     # Marqueurs pour les conditions
     is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
@@ -75,7 +76,7 @@ def check_data(df):
     df_with_anomalies.loc[df_with_anomalies['Marque'].isin(['', 'nan']), 'Anomalie'] += 'Marque manquante / '
     df_with_anomalies.loc[df_with_anomalies['Numéro de compteur'].isin(['', 'nan']), 'Anomalie'] += 'Numéro de compteur manquant / '
     df_with_anomalies.loc[df_with_anomalies['Diametre'].isnull(), 'Anomalie'] += 'Diamètre manquant / '
-    df_with_anomalies.loc[df_with_anomalies['Année de fabrication'].isnull(), 'Anomalie'] += 'Année de fabrication manquante / '
+    df_with_anomalies.loc[annee_fabrication_num.isnull(), 'Anomalie'] += 'Année de fabrication manquante / '
     
     # Numéro de tête manquant (sauf pour Kamstrup)
     condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup)
@@ -93,6 +94,7 @@ def check_data(df):
     
     # KAMSTRUP
     kamstrup_valid = is_kamstrup & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
+    df_with_anomalies.loc[is_kamstrup & (df_with_anomalies['Numéro de compteur'].str.len() != 8), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ 8 caractères / '
     df_with_anomalies.loc[kamstrup_valid & (df_with_anomalies['Numéro de compteur'] != df_with_anomalies['Numéro de tête']), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ Tête / '
     df_with_anomalies.loc[kamstrup_valid & (~df_with_anomalies['Numéro de compteur'].str.isdigit() | ~df_with_anomalies['Numéro de tête'].str.isdigit()), 'Anomalie'] += 'KAMSTRUP: Compteur ou Tête non numérique / '
     
@@ -235,7 +237,6 @@ if uploaded_file is not None:
                 red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
 
                 for i, row in enumerate(anomalies_df.iterrows()):
-                    # On utilise row[1] pour accéder aux données de la ligne
                     anomalies = str(row[1]['Anomalie']).split(' / ')
                     for anomaly in anomalies:
                         anomaly_key = anomaly.strip()
@@ -243,7 +244,6 @@ if uploaded_file is not None:
                             columns_to_highlight = anomaly_columns_map[anomaly_key]
                             for col_name in columns_to_highlight:
                                 try:
-                                    # Correction: Utilisation de list(anomalies_df.columns) pour obtenir l'index de la colonne
                                     col_index = list(anomalies_df.columns).index(col_name) + 1
                                     cell = ws.cell(row=i + 2, column=col_index)
                                     cell.fill = red_fill
