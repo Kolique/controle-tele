@@ -118,7 +118,8 @@ def check_data(df):
     df_with_anomalies.loc[condition_marque_compteur_h, 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (H) / '
 
     # Protocole Radio vs Traité
-    traite_lra = df_with_anomalies['Traité'].str.startswith(('903', '863'))
+    # J'ai ajouté .fillna(False) pour gérer les NaN avant d'appliquer l'opérateur ~
+    traite_lra = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
     traite_sgx = ~traite_lra
     
     condition_radio_lra = traite_lra & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA')
