@@ -56,11 +56,11 @@ def check_data(df):
     df_with_anomalies['Anomalie'] = ''
 
     # Conversion des colonnes pour les analyses et remplacement des NaN par des chaînes vides
-    df_with_anomalies['Numéro de compteur'] = df_with_anomalies['Numéro de compteur'].astype(str).fillna('')
-    df_with_anomalies['Numéro de tête'] = df_with_anomalies['Numéro de tête'].astype(str).fillna('')
-    df_with_anomalies['Marque'] = df_with_anomalies['Marque'].astype(str).fillna('')
-    df_with_anomalies['Protocole Radio'] = df_with_anomalies['Protocole Radio'].astype(str).fillna('')
-    df_with_anomalies['Traité'] = df_with_anomalies['Traité'].astype(str).fillna('')
+    df_with_anomalies['Numéro de compteur'] = df_with_anomalies['Numéro de compteur'].astype(str).replace('nan', '', regex=False)
+    df_with_anomalies['Numéro de tête'] = df_with_anomalies['Numéro de tête'].astype(str).replace('nan', '', regex=False)
+    df_with_anomalies['Marque'] = df_with_anomalies['Marque'].astype(str).replace('nan', '', regex=False)
+    df_with_anomalies['Protocole Radio'] = df_with_anomalies['Protocole Radio'].astype(str).replace('nan', '', regex=False)
+    df_with_anomalies['Traité'] = df_with_anomalies['Traité'].astype(str).replace('nan', '', regex=False)
 
     # Marqueurs pour les conditions
     is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
@@ -260,21 +260,6 @@ if uploaded_file is not None:
                                     cell.fill = red_fill
                                 except ValueError:
                                     pass
-
-                # Feuille "Résumé des anomalies"
-                ws_resume = wb.create_sheet(title="Résumé des anomalies")
-                
-                if not anomaly_counter.empty:
-                    summary_df = pd.DataFrame(anomaly_counter).reset_index()
-                    summary_df.columns = ["Type d'anomalie", "Nombre de cas"]
-
-                    # Écriture du résumé dans la feuille "Résumé des anomalies"
-                    for r_idx, row in enumerate(dataframe_to_rows(summary_df, index=False, header=True)):
-                        ws_resume.append(row)
-                    
-                    # Message de suggestion pour filtrer les données
-                    ws_resume.cell(row=len(summary_df) + 3, column=1, value="Pour afficher les anomalies d'un seul type, vous pouvez utiliser la fonction de filtre d'Excel sur la feuille 'Anomalies'.")
-                    ws_resume.cell(row=len(summary_df) + 3, column=1).font = Font(bold=True)
                 
                 # Enregistrement du classeur dans le buffer
                 excel_buffer_styled = io.BytesIO()
