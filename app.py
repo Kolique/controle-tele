@@ -95,7 +95,6 @@ def check_data(df):
     df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
     # Coordonnées
-    # La conversion en numérique ci-dessus résout le TypeError ici
     df_with_anomalies.loc[df_with_anomalies['Latitude'].isnull() | df_with_anomalies['Longitude'].isnull(), 'Anomalie'] += 'Coordonnées GPS non numériques / '
     coord_invalid = ((df_with_anomalies['Latitude'] == 0) | (~df_with_anomalies['Latitude'].between(-90, 90))) | \
                     ((df_with_anomalies['Longitude'] == 0) | (~df_with_anomalies['Longitude'].between(-180, 180)))
@@ -110,7 +109,6 @@ def check_data(df):
     df_with_anomalies.loc[is_kamstrup & (df_with_anomalies['Numéro de compteur'].str.len() != 8), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ 8 caractères / '
     df_with_anomalies.loc[kamstrup_valid & (df_with_anomalies['Numéro de compteur'] != df_with_anomalies['Numéro de tête']), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ Tête / '
     df_with_anomalies.loc[kamstrup_valid & (~df_with_anomalies['Numéro de compteur'].str.isdigit() | ~df_with_anomalies['Numéro de tête'].str.isdigit()), 'Anomalie'] += 'KAMSTRUP: Compteur ou Tête non numérique / '
-    # Diamètre pour KAMSTRUP
     diametre_kamstrup_anomalie = is_kamstrup & (~df_with_anomalies['Diametre'].between(15, 80))
     df_with_anomalies.loc[diametre_kamstrup_anomalie, 'Anomalie'] += 'KAMSTRUP: Diamètre hors de la plage [15, 80] / '
 
@@ -125,12 +123,6 @@ def check_data(df):
     itron_valid = is_itron & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[itron_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
     
-    # Règle de l'utilisateur : "ITRON: Compteur doit commencer par "I" ou "D"".
-    # Cette règle s'applique si un numéro de compteur ITRON est présent.
-    # L'interprétation du "respect FP2E" n'est pas claire pour ITRON, donc la règle est appliquée
-    # tant qu'un Numéro de compteur est renseigné.
-    df_with_anomalies.loc[is_itron & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
-
     # ------------------------------------------------------------------
     # ANOMALIES MULTI-COLONNES (logique consolidée)
     # ------------------------------------------------------------------
@@ -143,8 +135,11 @@ def check_data(df):
     condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle)
     df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
 
-    # Règle de diamètre FP2E (pour SAPPEL)
-    sappel_fp2e_condition = (is_sappel) & (df_with_anomalies['Numéro de compteur'].str.len() >= 5) & (df_with_anomalies['Diametre'].notnull())
+    # Règle de diamètre FP2E (pour SAPPEL et ITRON)
+    sappel_itron_fp2e_condition = (is_sappel | is_itron) & \
+                                  (df_with_anomalies['Numéro de compteur'].str.len() >= 5) & \
+                                  (df_with_anomalies['Diametre'].notnull())
+
     def check_fp2e(row):
         compteur = row['Numéro de compteur']
         annee_compteur = compteur[1:3]
@@ -152,11 +147,23 @@ def check_data(df):
         if len(annee_fabrication) < 2 or annee_compteur != annee_fabrication[-2:]:
             return False
         
+        # Le 5ème caractère est à l'index 4
+        if len(compteur) <= 4:
+            return False
+        
         lettre_diam = compteur[4].upper()
         return lettre_diam in diametre_lettre.get(row['Diametre'], [])
 
-    fp2e_anomalies = df_with_anomalies[sappel_fp2e_condition].apply(lambda row: not check_fp2e(row), axis=1)
-    df_with_anomalies.loc[sappel_fp2e_condition & fp2e_anomalies, 'Anomalie'] += 'SAPPEL: non conforme FP2E / '
+    fp2e_compliant = df_with_anomalies[sappel_itron_fp2e_condition].apply(check_fp2e, axis=1)
+    
+    # Ajout des messages d'anomalie pour SAPPEL et ITRON
+    df_with_anomalies.loc[sappel_itron_fp2e_condition & ~fp2e_compliant & is_sappel, 'Anomalie'] += 'SAPPEL: non conforme FP2E / '
+    df_with_anomalies.loc[sappel_itron_fp2e_condition & ~fp2e_compliant & is_itron, 'Anomalie'] += 'ITRON: non conforme FP2E / '
+    
+    # NOUVELLE LOGIQUE : L'anomalie "ITRON: Compteur doit commencer par "I" ou "D"" est vérifiée
+    # UNIQUEMENT si le compteur est un ITRON et qu'il est conforme au format FP2E.
+    itron_fp2e_compliant_mask = sappel_itron_fp2e_condition & fp2e_compliant & is_itron
+    df_with_anomalies.loc[itron_fp2e_compliant_mask & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
 
     # Nettoyage de la colonne 'Anomalie'
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(' /')
@@ -246,6 +253,7 @@ if uploaded_file is not None:
                 "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
                 "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "SAPPEL: non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
+                "ITRON: non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
                 
             }
 
