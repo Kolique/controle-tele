@@ -6,7 +6,6 @@ import re
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl import load_workbook
 from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -67,11 +66,11 @@ def check_data(df):
     df_with_anomalies['Latitude'] = pd.to_numeric(df_with_anomalies['Latitude'], errors='coerce')
     df_with_anomalies['Longitude'] = pd.to_numeric(df_with_anomalies['Longitude'], errors='coerce')
 
-
     # Marqueurs pour les conditions
     is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
     is_sappel = df_with_anomalies['Marque'].str.upper().isin(['SAPPEL (C)', 'SAPPEL (H)', 'SAPPEL(C)'])
     is_itron = df_with_anomalies['Marque'].str.upper() == 'ITRON'
+    is_mode_manuelle = df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE'
 
     annee_fabrication_num = pd.to_numeric(df_with_anomalies['Année de fabrication'], errors='coerce')
     df_with_anomalies['Diametre'] = pd.to_numeric(df_with_anomalies['Diametre'], errors='coerce')
@@ -80,18 +79,19 @@ def check_data(df):
     # ANOMALIES GÉNÉRALES (valeurs manquantes et incohérences de base)
     # ------------------------------------------------------------------
     
-    # Colonnes manquantes
-    # Nouvelle règle de contrôle: ne pas considérer comme une anomalie si le protocole radio est manquant
+    # Règle de l'utilisateur : ne pas considérer comme une anomalie si le protocole radio est manquant
     # ET le mode de relève est "Manuelle".
-    condition_protocole_manquant = (df_with_anomalies['Protocole Radio'].isin(['', 'nan'])) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
+    condition_protocole_manquant = (df_with_anomalies['Protocole Radio'].isin(['', 'nan'])) & (~is_mode_manuelle)
     df_with_anomalies.loc[condition_protocole_manquant, 'Anomalie'] += 'Protocole Radio manquant / '
+    
+    # Règle de l'utilisateur : Marque manquante. Cette règle s'applique à tous les cas.
     df_with_anomalies.loc[df_with_anomalies['Marque'].isin(['', 'nan']), 'Anomalie'] += 'Marque manquante / '
     df_with_anomalies.loc[df_with_anomalies['Numéro de compteur'].isin(['', 'nan']), 'Anomalie'] += 'Numéro de compteur manquant / '
     df_with_anomalies.loc[df_with_anomalies['Diametre'].isnull(), 'Anomalie'] += 'Diamètre manquant / '
     df_with_anomalies.loc[annee_fabrication_num.isnull(), 'Anomalie'] += 'Année de fabrication manquante / '
     
-    # Numéro de tête manquant (sauf pour Kamstrup)
-    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup)
+    # Règle de l'utilisateur : Numéro de tête manquant est une anomalie SAUF pour Kamstrup ET SAUF si le mode de relève est "Manuelle".
+    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup) & (~is_mode_manuelle)
     df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
     # Coordonnées
@@ -110,7 +110,7 @@ def check_data(df):
     df_with_anomalies.loc[is_kamstrup & (df_with_anomalies['Numéro de compteur'].str.len() != 8), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ 8 caractères / '
     df_with_anomalies.loc[kamstrup_valid & (df_with_anomalies['Numéro de compteur'] != df_with_anomalies['Numéro de tête']), 'Anomalie'] += 'KAMSTRUP: Compteur ≠ Tête / '
     df_with_anomalies.loc[kamstrup_valid & (~df_with_anomalies['Numéro de compteur'].str.isdigit() | ~df_with_anomalies['Numéro de tête'].str.isdigit()), 'Anomalie'] += 'KAMSTRUP: Compteur ou Tête non numérique / '
-    # NOUVELLE RÈGLE : Diamètre pour KAMSTRUP
+    # Diamètre pour KAMSTRUP
     diametre_kamstrup_anomalie = is_kamstrup & (~df_with_anomalies['Diametre'].between(15, 80))
     df_with_anomalies.loc[diametre_kamstrup_anomalie, 'Anomalie'] += 'KAMSTRUP: Diamètre hors de la plage [15, 80] / '
 
@@ -124,6 +124,11 @@ def check_data(df):
     # ITRON
     itron_valid = is_itron & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[itron_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
+    
+    # Règle de l'utilisateur : "ITRON: Compteur doit commencer par "I" ou "D"".
+    # Cette règle s'applique si un numéro de compteur ITRON est présent.
+    # L'interprétation du "respect FP2E" n'est pas claire pour ITRON, donc la règle est appliquée
+    # tant qu'un Numéro de compteur est renseigné.
     df_with_anomalies.loc[is_itron & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
 
     # ------------------------------------------------------------------
@@ -132,10 +137,10 @@ def check_data(df):
 
     # Protocole Radio vs Traité
     traite_lra_condition = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
-    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA')
+    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & (~is_mode_manuelle)
     df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA pour Traité 903/863 / '
     
-    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX')
+    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle)
     df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
 
     # Règle de diamètre FP2E (pour SAPPEL)
