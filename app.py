@@ -45,6 +45,16 @@ def check_data(df):
     """
     df_with_anomalies = df.copy()
 
+    # --- NOUVELLE LOGIQUE AJOUTÉE ---
+    # Traitement de la colonne 'Année de fabrication' pour formater les chiffres simples
+    df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].astype(str)
+    
+    # Remplacer les valeurs qui sont des nombres à un chiffre par leur version avec un zéro en début
+    df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].apply(
+        lambda x: x.zfill(2) if x.isdigit() and len(x) == 1 else x
+    )
+    # --- FIN DE LA NOUVELLE LOGIQUE ---
+
     # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité', 'Mode de relève']
     if not all(col in df_with_anomalies.columns for col in required_columns):
@@ -143,7 +153,7 @@ def check_data(df):
     def check_fp2e(row):
         compteur = row['Numéro de compteur']
         annee_compteur = compteur[1:3]
-        annee_fabrication = str(int(row['Année de fabrication'])) if pd.notna(row['Année de fabrication']) else ''
+        annee_fabrication = str(row['Année de fabrication']) if pd.notna(row['Année de fabrication']) else ''
         if len(annee_fabrication) < 2 or annee_compteur != annee_fabrication[-2:]:
             return False
         
