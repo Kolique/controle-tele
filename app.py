@@ -280,50 +280,62 @@ if uploaded_file is not None:
                 # Création d'un classeur Excel
                 wb = Workbook()
                 
-                # ----------------- NOUVELLE LOGIQUE POUR L'EXCEL -----------------
-                # Feuille "Récapitulatif des anomalies"
-                ws_summary = wb.active
-                ws_summary.title = "Récapitulatif"
+                # Suppression de la première feuille par défaut qui est vide et création de la feuille "Récapitulatif"
+                default_sheet = wb.active
+                wb.remove(default_sheet)
+                ws_summary = wb.create_sheet(title="Récapitulatif", index=0)
                 
-                # Mise en forme pour le titre
                 title_font = Font(bold=True, size=16)
                 header_font = Font(bold=True)
                 
                 ws_summary['A1'] = "Récapitulatif des anomalies"
                 ws_summary['A1'].font = title_font
                 
-                # Écriture du résumé avec un lien vers les feuilles détaillées
                 ws_summary.append([]) # Ligne vide pour la séparation
                 ws_summary.append(["Type d'anomalie", "Nombre de cas"])
                 ws_summary['A3'].font = header_font
                 ws_summary['B3'].font = header_font
+                
+                # Création d'une liste pour stocker les noms de feuilles déjà créées
+                created_sheet_names = set()
 
                 for r_idx, (anomaly_type, count) in enumerate(anomaly_counter.items()):
+                    # Correction du nettoyage du nom de la feuille et ajout d'une vérification d'unicité
+                    sheet_name = re.sub(r'[\\/?*\[\]:()\'"<>|]', '', anomaly_type)
+                    sheet_name = sheet_name.replace(' ', '_').replace('.', '').strip()
+                    sheet_name = sheet_name[:31] # Tronquer à la longueur max
+                    
+                    # S'assurer que le nom de la feuille est unique
+                    original_sheet_name = sheet_name
+                    counter = 1
+                    while sheet_name in created_sheet_names:
+                        sheet_name = f"{original_sheet_name[:28]}_{counter}"
+                        counter += 1
+                    created_sheet_names.add(sheet_name)
+
                     row_num = r_idx + 4
                     ws_summary.cell(row=row_num, column=1, value=anomaly_type)
                     ws_summary.cell(row=row_num, column=2, value=count)
                     
-                    # Nettoyage du nom pour la feuille (limité à 31 caractères, pas de caractères spéciaux)
-                    sheet_name = anomaly_type.replace(':', '').replace('/', '').replace(' ', '_')
                     # Création de la feuille pour cette anomalie
-                    ws_anomaly_detail = wb.create_sheet(title=sheet_name[:31])
+                    ws_anomaly_detail = wb.create_sheet(title=sheet_name)
                     
                     # Écriture des données de l'anomalie dans la feuille dédiée
+                    # Filtrer le DataFrame pour ne garder que les lignes contenant cette anomalie
                     filtered_df = anomalies_df[anomalies_df['Anomalie'].str.contains(anomaly_type, regex=False)]
                     
+                    # Utilisation de dataframe_to_rows pour écrire les données
                     for r_df_idx, row_data in enumerate(dataframe_to_rows(filtered_df, index=False, header=True)):
                         ws_anomaly_detail.append(row_data)
 
                     # Mise en forme et en couleur de la feuille détaillée
                     red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
                     
-                    # Highlight the first row (headers)
+                    # Mise en surbrillance de la première ligne (en-têtes)
                     for cell in ws_anomaly_detail[1]:
                         cell.font = header_font
                     
-                    # Find and highlight the specific columns for this anomaly
-                    # The list of anomaly types is what's used to color the cells.
-                    # It's better to iterate over the row's 'Anomalie' column rather than the key itself
+                    # Mise en surbrillance des cellules spécifiques
                     for row_num_detail, df_row in enumerate(filtered_df.iterrows()):
                         anomalies = str(df_row[1]['Anomalie']).split(' / ')
                         for anomaly in anomalies:
@@ -332,7 +344,8 @@ if uploaded_file is not None:
                                 columns_to_highlight = anomaly_columns_map[anomaly_key]
                                 for col_name in columns_to_highlight:
                                     try:
-                                        col_index = list(anomalies_df.columns).index(col_name) + 1
+                                        # Correction ici : on utilise les colonnes de filtered_df
+                                        col_index = list(filtered_df.columns).index(col_name) + 1
                                         cell = ws_anomaly_detail.cell(row=row_num_detail + 2, column=col_index)
                                         cell.fill = red_fill
                                     except ValueError:
@@ -368,12 +381,6 @@ if uploaded_file is not None:
                     adjusted_width = (max_length + 2)
                     ws_summary.column_dimensions[get_column_letter(column)].width = adjusted_width
                 
-                # Suppression de la première feuille par défaut
-                if "Sheet" in wb.sheetnames:
-                    wb.remove(wb["Sheet"])
-                
-                # ----------------- FIN DE LA NOUVELLE LOGIQUE -----------------
-
                 excel_buffer_styled = io.BytesIO()
                 wb.save(excel_buffer_styled)
                 excel_buffer_styled.seek(0)
