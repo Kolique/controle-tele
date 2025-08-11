@@ -4,9 +4,8 @@ import io
 import csv
 import re
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.styles import Font, Border, Side, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 
 # Table de correspondance Diametre -> Lettre pour FP2E
@@ -281,32 +280,100 @@ if uploaded_file is not None:
                 # Création d'un classeur Excel
                 wb = Workbook()
                 
-                # Feuille "Anomalies"
-                ws_anomalies = wb.active
-                ws_anomalies.title = "Anomalies"
+                # ----------------- NOUVELLE LOGIQUE POUR L'EXCEL -----------------
+                # Feuille "Récapitulatif des anomalies"
+                ws_summary = wb.active
+                ws_summary.title = "Récapitulatif"
                 
-                # Écriture du DataFrame des anomalies dans la feuille "Anomalies"
-                for r_idx, row in enumerate(dataframe_to_rows(anomalies_df, index=False, header=True)):
-                    ws_anomalies.append(row)
+                # Mise en forme pour le titre
+                title_font = Font(bold=True, size=16)
+                header_font = Font(bold=True)
+                
+                ws_summary['A1'] = "Récapitulatif des anomalies"
+                ws_summary['A1'].font = title_font
+                
+                # Écriture du résumé avec un lien vers les feuilles détaillées
+                ws_summary.append([]) # Ligne vide pour la séparation
+                ws_summary.append(["Type d'anomalie", "Nombre de cas"])
+                ws_summary['A3'].font = header_font
+                ws_summary['B3'].font = header_font
 
-                # Mise en forme et mise en couleur de la feuille "Anomalies"
-                red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+                for r_idx, (anomaly_type, count) in enumerate(anomaly_counter.items()):
+                    row_num = r_idx + 4
+                    ws_summary.cell(row=row_num, column=1, value=anomaly_type)
+                    ws_summary.cell(row=row_num, column=2, value=count)
+                    
+                    # Nettoyage du nom pour la feuille (limité à 31 caractères, pas de caractères spéciaux)
+                    sheet_name = anomaly_type.replace(':', '').replace('/', '').replace(' ', '_')
+                    # Création de la feuille pour cette anomalie
+                    ws_anomaly_detail = wb.create_sheet(title=sheet_name[:31])
+                    
+                    # Écriture des données de l'anomalie dans la feuille dédiée
+                    filtered_df = anomalies_df[anomalies_df['Anomalie'].str.contains(anomaly_type, regex=False)]
+                    
+                    for r_df_idx, row_data in enumerate(dataframe_to_rows(filtered_df, index=False, header=True)):
+                        ws_anomaly_detail.append(row_data)
 
-                for i, row in enumerate(anomalies_df.iterrows()):
-                    anomalies = str(row[1]['Anomalie']).split(' / ')
-                    for anomaly in anomalies:
-                        anomaly_key = anomaly.strip()
-                        if anomaly_key in anomaly_columns_map:
-                            columns_to_highlight = anomaly_columns_map[anomaly_key]
-                            for col_name in columns_to_highlight:
-                                try:
-                                    col_index = list(anomalies_df.columns).index(col_name) + 1
-                                    cell = ws_anomalies.cell(row=i + 2, column=col_index)
-                                    cell.fill = red_fill
-                                except ValueError:
-                                    pass
-                                
-                # Enregistrement du classeur dans le buffer
+                    # Mise en forme et en couleur de la feuille détaillée
+                    red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+                    
+                    # Highlight the first row (headers)
+                    for cell in ws_anomaly_detail[1]:
+                        cell.font = header_font
+                    
+                    # Find and highlight the specific columns for this anomaly
+                    # The list of anomaly types is what's used to color the cells.
+                    # It's better to iterate over the row's 'Anomalie' column rather than the key itself
+                    for row_num_detail, df_row in enumerate(filtered_df.iterrows()):
+                        anomalies = str(df_row[1]['Anomalie']).split(' / ')
+                        for anomaly in anomalies:
+                            anomaly_key = anomaly.strip()
+                            if anomaly_key in anomaly_columns_map:
+                                columns_to_highlight = anomaly_columns_map[anomaly_key]
+                                for col_name in columns_to_highlight:
+                                    try:
+                                        col_index = list(anomalies_df.columns).index(col_name) + 1
+                                        cell = ws_anomaly_detail.cell(row=row_num_detail + 2, column=col_index)
+                                        cell.fill = red_fill
+                                    except ValueError:
+                                        pass
+
+                    # Ajuster la largeur des colonnes dans la feuille détaillée
+                    for col in ws_anomaly_detail.columns:
+                        max_length = 0
+                        column = col[0].column # Get the column letter (A, B, C, ...)
+                        for cell in col:
+                            try: # Necessary to avoid error on non-string cells
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = (max_length + 2)
+                        ws_anomaly_detail.column_dimensions[get_column_letter(column)].width = adjusted_width
+
+                    # Création du lien vers la feuille détaillée sur la page de résumé
+                    ws_summary.cell(row=row_num, column=1).hyperlink = f"#{sheet_name}!A1"
+                    ws_summary.cell(row=row_num, column=1).font = Font(underline="single", color="0563C1")
+                    
+                # Ajuster la largeur des colonnes dans le résumé
+                for col in ws_summary.columns:
+                    max_length = 0
+                    column = col[0].column
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = (max_length + 2)
+                    ws_summary.column_dimensions[get_column_letter(column)].width = adjusted_width
+                
+                # Suppression de la première feuille par défaut
+                if "Sheet" in wb.sheetnames:
+                    wb.remove(wb["Sheet"])
+                
+                # ----------------- FIN DE LA NOUVELLE LOGIQUE -----------------
+
                 excel_buffer_styled = io.BytesIO()
                 wb.save(excel_buffer_styled)
                 excel_buffer_styled.seek(0)
