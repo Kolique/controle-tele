@@ -285,8 +285,47 @@ if uploaded_file is not None:
                 wb.remove(default_sheet)
                 ws_summary = wb.create_sheet(title="Récapitulatif", index=0)
                 
-                title_font = Font(bold=True, size=16)
+                # Ajout de la nouvelle feuille "Toutes les anomalies"
+                ws_all_anomalies = wb.create_sheet(title="Toutes_Anomalies", index=1)
+                for r_df_idx, row_data in enumerate(dataframe_to_rows(anomalies_df, index=False, header=True)):
+                    ws_all_anomalies.append(row_data)
+
+                # Mise en forme de la feuille "Toutes les anomalies"
                 header_font = Font(bold=True)
+                red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+
+                for cell in ws_all_anomalies[1]:
+                    cell.font = header_font
+
+                for row_num_all, df_row in enumerate(anomalies_df.iterrows()):
+                    anomalies = str(df_row[1]['Anomalie']).split(' / ')
+                    for anomaly in anomalies:
+                        anomaly_key = anomaly.strip()
+                        if anomaly_key in anomaly_columns_map:
+                            columns_to_highlight = anomaly_columns_map[anomaly_key]
+                            for col_name in columns_to_highlight:
+                                try:
+                                    col_index = list(anomalies_df.columns).index(col_name) + 1
+                                    cell = ws_all_anomalies.cell(row=row_num_all + 2, column=col_index)
+                                    cell.fill = red_fill
+                                except ValueError:
+                                    pass
+
+                # Ajuster la largeur des colonnes dans la feuille "Toutes les anomalies"
+                for col in ws_all_anomalies.columns:
+                    max_length = 0
+                    column = col[0].column
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = (max_length + 2)
+                    ws_all_anomalies.column_dimensions[get_column_letter(column)].width = adjusted_width
+
+                # Mise en forme pour le titre du résumé
+                title_font = Font(bold=True, size=16)
                 
                 ws_summary['A1'] = "Récapitulatif des anomalies"
                 ws_summary['A1'].font = title_font
@@ -297,8 +336,14 @@ if uploaded_file is not None:
                 ws_summary['B3'].font = header_font
                 
                 # Création d'une liste pour stocker les noms de feuilles déjà créées
-                created_sheet_names = set()
+                created_sheet_names = set(["Toutes_Anomalies"]) # Ajouter le nom de la nouvelle feuille
 
+                # Ajouter un lien vers la nouvelle feuille "Toutes les anomalies"
+                ws_summary.cell(row=ws_summary.max_row + 1, column=1, value="Toutes les anomalies").hyperlink = f"#Toutes_Anomalies!A1"
+                ws_summary.cell(row=ws_summary.max_row, column=1).font = Font(underline="single", color="0563C1")
+                ws_summary.cell(row=ws_summary.max_row, column=2, value=len(anomalies_df)).font = header_font
+                ws_summary.cell(row=ws_summary.max_row, column=2).alignment = Alignment(horizontal="right")
+                
                 for r_idx, (anomaly_type, count) in enumerate(anomaly_counter.items()):
                     # Correction du nettoyage du nom de la feuille et ajout d'une vérification d'unicité
                     sheet_name = re.sub(r'[\\/?*\[\]:()\'"<>|]', '', anomaly_type)
@@ -313,7 +358,7 @@ if uploaded_file is not None:
                         counter += 1
                     created_sheet_names.add(sheet_name)
 
-                    row_num = r_idx + 4
+                    row_num = ws_summary.max_row + 1
                     ws_summary.cell(row=row_num, column=1, value=anomaly_type)
                     ws_summary.cell(row=row_num, column=2, value=count)
                     
@@ -329,7 +374,6 @@ if uploaded_file is not None:
                         ws_anomaly_detail.append(row_data)
 
                     # Mise en forme et en couleur de la feuille détaillée
-                    red_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
                     
                     # Mise en surbrillance de la première ligne (en-têtes)
                     for cell in ws_anomaly_detail[1]:
