@@ -44,16 +44,22 @@ def check_data(df):
     """
     df_with_anomalies = df.copy()
 
-    # --- NOUVELLE LOGIQUE AJOUTÉE ---
-    # Traitement de la colonne 'Année de fabrication' pour formater les chiffres simples
-    df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].astype(str)
+    # --- DÉBUT DE LA LOGIQUE CORRIGÉE POUR L'ANNÉE DE FABRICATION ---
+    # Convertir d'abord la colonne en chaîne de caractères, en remplacant les valeurs manquantes
+    # Cela permet de traiter les années comme '8' ou '2008' sans erreur.
+    df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].astype(str).replace('nan', '', regex=False)
     
-    # Remplacer les valeurs qui sont des nombres à un chiffre par leur version avec un zéro en début
+    # Remplacer les valeurs numériques (y compris celles en float comme '8.0') par un format propre
+    # Cette étape est cruciale pour que la transformation en deux chiffres fonctionne bien
     df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].apply(
-        lambda x: x.zfill(2) if x.isdigit() and len(x) == 1 else x
+        lambda x: str(int(float(x))) if x.replace('.', '', 1).isdigit() and x != '' else x
     )
-    # --- FIN DE LA NOUVELLE LOGIQUE ---
 
+    # Convertir l'année en deux chiffres (ex: '2008' -> '08', '8' -> '08')
+    df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].str.slice(-2).str.zfill(2)
+
+    # --- FIN DE LA LOGIQUE CORRIGÉE ---
+    
     # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité', 'Mode de relève']
     if not all(col in df_with_anomalies.columns for col in required_columns):
@@ -149,19 +155,32 @@ def check_data(df):
                                   (df_with_anomalies['Numéro de compteur'].str.len() >= 5) & \
                                   (df_with_anomalies['Diametre'].notnull())
 
+    # Utilisation d'une map plus robuste pour la vérification du diamètre
+    fp2e_map = {'A': 15, 'U': 15, 'V': 15, 'B': 20, 'C': 25, 'D': 30, 'E': 40, 'F': 50, 'G': [60, 65], 'H': 80, 'I': 100, 'J': 125, 'K': 150}
+
     def check_fp2e(row):
-        compteur = row['Numéro de compteur']
-        annee_compteur = compteur[1:3]
-        annee_fabrication = str(row['Année de fabrication']) if pd.notna(row['Année de fabrication']) else ''
-        if len(annee_fabrication) < 2 or annee_compteur != annee_fabrication[-2:]:
+        try:
+            compteur = row['Numéro de compteur']
+            if len(compteur) < 5:
+                return False
+            
+            annee_compteur = compteur[1:3]
+            annee_fabrication = row['Année de fabrication']
+            
+            if pd.isna(annee_fabrication) or annee_fabrication == '' or annee_compteur != annee_fabrication:
+                return False
+            
+            lettre_diam = compteur[4].upper()
+            
+            expected_diametres = fp2e_map.get(lettre_diam, [])
+            
+            if not isinstance(expected_diametres, list):
+                expected_diametres = [expected_diametres]
+            
+            return row['Diametre'] in expected_diametres
+
+        except (TypeError, ValueError, IndexError):
             return False
-        
-        # Le 5ème caractère est à l'index 4
-        if len(compteur) <= 4:
-            return False
-        
-        lettre_diam = compteur[4].upper()
-        return lettre_diam in diametre_lettre.get(row['Diametre'], [])
 
     fp2e_compliant = df_with_anomalies[sappel_itron_fp2e_condition].apply(check_fp2e, axis=1)
     
@@ -249,7 +268,6 @@ if uploaded_file is not None:
                 "Diamètre manquant": ['Diametre'],
                 "Année de fabrication manquante": ['Année de fabrication'],
                 
-                # Anomalies spécifiques
                 "KAMSTRUP: Compteur ≠ Tête": ['Numéro de compteur', 'Numéro de tête'],
                 "KAMSTRUP: Compteur ou Tête non numérique": ['Numéro de compteur', 'Numéro de tête'],
                 "KAMSTRUP: Diamètre hors de la plage [15, 80]": ['Diametre'],
@@ -263,7 +281,6 @@ if uploaded_file is not None:
                 "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "SAPPEL: non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
                 "ITRON: non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
-                
             }
 
             if file_extension == 'csv':
@@ -314,7 +331,7 @@ if uploaded_file is not None:
                 # Ajuster la largeur des colonnes dans la feuille "Toutes les anomalies"
                 for col in ws_all_anomalies.columns:
                     max_length = 0
-                    column = col[0].column
+                    column = col[0].column # Get the column letter (A, B, C, ...)
                     for cell in col:
                         try:
                             if len(str(cell.value)) > max_length:
@@ -424,7 +441,7 @@ if uploaded_file is not None:
                             pass
                     adjusted_width = (max_length + 2)
                     ws_summary.column_dimensions[get_column_letter(column)].width = adjusted_width
-                
+                    
                 excel_buffer_styled = io.BytesIO()
                 wb.save(excel_buffer_styled)
                 excel_buffer_styled.seek(0)
