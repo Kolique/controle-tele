@@ -98,7 +98,7 @@ def check_data(df):
     df_with_anomalies['Année de fabrication'] = df_with_anomalies['Année de fabrication'].str.slice(-2).str.zfill(2)
     
     # Vérification des colonnes requises
-    required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité', 'Mode de relève']
+    required_columns = ['Protocole Radio', 'Marque', 'Numéro de tête', 'Numéro de compteur', 'Latitude', 'Longitude', 'Commune', 'Année de fabrication', 'Diametre', 'Traité', 'Mode de relève']
     if not all(col in df_with_anomalies.columns for col in required_columns):
         missing = [col for col in required_columns if col not in df_with_anomalies.columns]
         st.error(f"Colonnes requises manquantes : {', '.join(missing)}")
@@ -122,7 +122,7 @@ def check_data(df):
     # Marqueurs pour les conditions
     is_kamstrup = df_with_anomalies['Marque'].str.upper() == 'KAMSTRUP'
     is_sappel = df_with_anomalies['Marque'].str.upper().isin(['SAPPEL (C)', 'SAPPEL (H)', 'SAPPEL(C)'])
-    is_itron = df_with_anomalies['Marque'].str.upper() == 'ITRON'
+    is_itron_diehl = df_with_anomalies['Marque'].str.upper().isin(['ITRON', 'DIEHL'])
     is_mode_manuelle = df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE'
 
     annee_fabrication_num = pd.to_numeric(df_with_anomalies['Année de fabrication'], errors='coerce')
@@ -164,14 +164,13 @@ def check_data(df):
     sappel_valid = is_sappel & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[sappel_valid & (df_with_anomalies['Numéro de tête'].str.len() != 16), 'Anomalie'] += 'SAPPEL: Tête ≠ 16 caractères / '
     
-    # Correction pour SAPPEL C
     df_with_anomalies.loc[(is_sappel) & (df_with_anomalies['Numéro de compteur'].str.startswith('C', na=False)) & (df_with_anomalies['Marque'].str.upper() != 'SAPPEL (C)'), 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (C) / '
     
     df_with_anomalies.loc[(is_sappel) & (df_with_anomalies['Numéro de compteur'].str.startswith('H', na=False)) & (df_with_anomalies['Marque'].str.upper() != 'SAPPEL (H)'), 'Anomalie'] += 'SAPPEL: Incohérence Marque/Compteur (H) / '
     
-    # ITRON
-    itron_valid = is_itron & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
-    df_with_anomalies.loc[itron_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
+    # ITRON et DIEHL
+    itron_diehl_valid = is_itron_diehl & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
+    df_with_anomalies.loc[itron_diehl_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON/DIEHL: Tête ≠ 8 caractères / '
     
     # ------------------------------------------------------------------
     # ANOMALIES MULTI-COLONNES (logique consolidée)
@@ -194,10 +193,12 @@ def check_data(df):
     # Condition pour appliquer la vérification FP2E
     fp2e_regex = r'^[A-Z]\d{2}[A-Z]{2}\d{6}$'
     
-    sappel_itron_non_manuelle = (is_sappel | is_itron) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
+    # La vérification FP2E s'applique sur les compteurs SAPPEL/ITRON/DIEHL non-manuels
+    sappel_itron_diehl_non_manuelle = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
+    # OU sur les compteurs manuels qui ont déjà un format FP2E correct
     manuelle_format_ok = (df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE') & (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
     
-    fp2e_check_condition = sappel_itron_non_manuelle | manuelle_format_ok
+    fp2e_check_condition = sappel_itron_diehl_non_manuelle | manuelle_format_ok
     
     fp2e_results = df_with_anomalies[fp2e_check_condition].apply(check_fp2e_details, axis=1)
     
@@ -295,7 +296,7 @@ if uploaded_file is not None:
                 "SAPPEL: Tête ≠ 16 caractères": ['Numéro de tête'],
                 "SAPPEL: Incohérence Marque/Compteur (C)": ['Numéro de compteur'],
                 "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
-                "ITRON: Tête ≠ 8 caractères": ['Numéro de tête'],
+                "ITRON/DIEHL: Tête ≠ 8 caractères": ['Numéro de tête'],
                 "ITRON: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
                 "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
                 "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
@@ -332,9 +333,7 @@ if uploaded_file is not None:
                 for row_num_all, df_row in enumerate(anomalies_df.iterrows()):
                     anomalies = str(df_row[1]['Anomalie']).split(' / ')
                     
-                    # Logique de coloriage pour FP2E
                     if 'non conforme FP2E' in anomalies:
-                        # La colonne 'Anomalie Détaillée FP2E' peut contenir plusieurs anomalies séparées par ' / '
                         fp2e_details = str(df_row[1]['Anomalie Détaillée FP2E']).split(' / ')
                         columns_to_highlight = []
 
@@ -398,7 +397,6 @@ if uploaded_file is not None:
                 ws_summary.cell(row=row_num_all_anomalies, column=2).alignment = Alignment(horizontal="right")
                 
                 for r_idx, (anomaly_type, count) in enumerate(anomaly_counter.items()):
-                    # Logique pour raccourcir le nom de la feuille
                     if len(anomaly_type) > 28:
                         sheet_name_base = anomaly_type[:28]
                     else:
