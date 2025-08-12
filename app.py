@@ -180,11 +180,16 @@ def check_data(df):
     
     # Protocole Radio vs Traité
     traite_lra_condition = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
-    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & (~is_mode_manuelle) & is_protocole_radio_filled
-    df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA pour Traité 903/863 / '
     
-    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle) & is_protocole_radio_filled
-    df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
+    # Logique corrigée pour les protocoles acceptés
+    lra_protocol_ok = df_with_anomalies['Protocole Radio'].str.upper().isin(['LRA', 'WMS'])
+    sgx_protocol_ok = df_with_anomalies['Protocole Radio'].str.upper().isin(['SGX', 'OMS', 'WMS'])
+
+    condition_radio_lra = traite_lra_condition & (~lra_protocol_ok) & (~is_mode_manuelle) & is_protocole_radio_filled
+    df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA/WMS pour Traité 903/863 / '
+    
+    condition_radio_sgx = (~traite_lra_condition) & (~sgx_protocol_ok) & (~is_mode_manuelle) & is_protocole_radio_filled
+    df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX/OMS/WMS pour Traité non 903/863 / '
 
     # ------------------------------------------------------------------
     # LOGIQUE CORRIGÉE POUR LA NORME FP2E
@@ -193,9 +198,7 @@ def check_data(df):
     # Condition pour appliquer la vérification FP2E
     fp2e_regex = r'^[A-Z]\d{2}[A-Z]{2}\d{6}$'
     
-    # La vérification FP2E s'applique sur les compteurs SAPPEL/ITRON/DIEHL non-manuels
     sappel_itron_diehl_non_manuelle = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
-    # OU sur les compteurs manuels qui ont une marque SAPPEL/ITRON/DIEHL ET un format FP2E correct
     manuelle_format_ok = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE') & (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
     
     fp2e_check_condition = sappel_itron_diehl_non_manuelle | manuelle_format_ok
@@ -298,8 +301,8 @@ if uploaded_file is not None:
                 "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
                 "ITRON/DIEHL: Tête ≠ 8 caractères": ['Numéro de tête'],
                 "ITRON/DIEHL: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
-                "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
-                "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
+                "Protocole ≠ LRA/WMS pour Traité 903/863": ['Protocole Radio', 'Traité'],
+                "Protocole ≠ SGX/OMS/WMS pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
             }
 
