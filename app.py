@@ -174,21 +174,27 @@ def check_data(df):
     df_with_anomalies.loc[itron_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
     
     # ------------------------------------------------------------------
-    # ANOMALIES MULTI-COLONNES (logique consolidée)
+    # ANOMALIES MULTI-COLONNES (logique corrigée)
     # ------------------------------------------------------------------
     # Ajout de la condition pour vérifier que Protocole Radio n'est pas vide
     is_protocole_radio_filled = ~df_with_anomalies['Protocole Radio'].isin(['', 'nan'])
-    
+    # Ajout de la condition pour vérifier que Numéro de tête n'est pas vide
+    is_tete_filled = ~df_with_anomalies['Numéro de tête'].isin(['', 'nan'])
+
     # Protocole Radio vs Traité
+    # La vérification se fait désormais seulement si le mode n'est pas manuel,
+    # le protocole radio est rempli ET le numéro de tête est également présent.
+    condition_check_protocole = (~is_mode_manuelle) & is_protocole_radio_filled & is_tete_filled
     traite_lra_condition = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
-    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & (~is_mode_manuelle) & is_protocole_radio_filled
+
+    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & condition_check_protocole
     df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA pour Traité 903/863 / '
     
-    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle) & is_protocole_radio_filled
+    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & condition_check_protocole
     df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
-
+    
     # ------------------------------------------------------------------
-    # LOGIQUE CORRIGÉE POUR LA NORME FP2E
+    # NOUVELLE LOGIQUE POUR LE CONTRÔLE FP2E ET ITRON/SAPPEL
     # ------------------------------------------------------------------
     
     # Condition pour appliquer la vérification FP2E
@@ -304,8 +310,8 @@ if uploaded_file is not None:
                 "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
                 "ITRON: Tête ≠ 8 caractères": ['Numéro de tête'],
                 "Manuelle: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
-                "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
-                "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
+                "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité', 'Numéro de tête'],
+                "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité', 'Numéro de tête'],
                 "non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
             }
 
