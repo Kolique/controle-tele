@@ -193,11 +193,12 @@ def check_data(df):
     # Condition pour appliquer la vérification FP2E
     fp2e_regex = r'^[A-Z]\d{2}[A-Z]{2}\d{6}$'
     
-    sappel_non_manuelle = is_sappel & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
-    itron_diehl_non_manuelle = is_itron_diehl & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
-    manuelle_format_ok = (df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE') & (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
+    # La vérification FP2E s'applique sur les compteurs SAPPEL/ITRON/DIEHL non-manuels
+    sappel_itron_diehl_non_manuelle = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
+    # OU sur les compteurs manuels qui ont une marque SAPPEL/ITRON/DIEHL ET un format FP2E correct
+    manuelle_format_ok = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE') & (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
     
-    fp2e_check_condition = sappel_non_manuelle | itron_diehl_non_manuelle | manuelle_format_ok
+    fp2e_check_condition = sappel_itron_diehl_non_manuelle | manuelle_format_ok
     
     fp2e_results = df_with_anomalies[fp2e_check_condition].apply(check_fp2e_details, axis=1)
     
@@ -207,7 +208,7 @@ def check_data(df):
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie'] += 'non conforme FP2E / '
     
     # NOUVELLE LOGIQUE : L'anomalie "ITRON/DIEHL: Compteur doit commencer par "I" ou "D"" est vérifiée
-    # UNIQUEMENT si le compteur est un ITRON/DIEHL et qu'il est conforme au format FP2E.
+    # UNIQUEMENT si le compteur est un ITRON/DIEHL et qu'il n'a PAS déjà l'anomalie FP2E
     itron_diehl_fp2e_compliant_mask = is_itron_diehl & (~df_with_anomalies['Anomalie'].str.contains('non conforme FP2E', na=False))
     df_with_anomalies.loc[itron_diehl_fp2e_compliant_mask & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON/DIEHL: Compteur doit commencer par "I" ou "D" / '
     
@@ -499,4 +500,4 @@ if uploaded_file is not None:
                     mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 )
         else:
-            st.success("Aucune anomalie détectée. Les données sont conformes.")
+            st.success("Aucune anomalie détectée ! Les données sont conformes.")
