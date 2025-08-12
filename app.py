@@ -174,34 +174,30 @@ def check_data(df):
     df_with_anomalies.loc[itron_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON: Tête ≠ 8 caractères / '
     
     # ------------------------------------------------------------------
-    # ANOMALIES MULTI-COLONNES (logique corrigée)
+    # ANOMALIES MULTI-COLONNES (logique consolidée)
     # ------------------------------------------------------------------
     # Ajout de la condition pour vérifier que Protocole Radio n'est pas vide
     is_protocole_radio_filled = ~df_with_anomalies['Protocole Radio'].isin(['', 'nan'])
-    # Ajout de la condition pour vérifier que Numéro de tête n'est pas vide
-    is_tete_filled = ~df_with_anomalies['Numéro de tête'].isin(['', 'nan'])
-
+    
     # Protocole Radio vs Traité
-    # La vérification se fait désormais seulement si le mode n'est pas manuel,
-    # le protocole radio est rempli ET le numéro de tête est également présent.
-    condition_check_protocole = (~is_mode_manuelle) & is_protocole_radio_filled & is_tete_filled
     traite_lra_condition = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
-
-    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & condition_check_protocole
+    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & (~is_mode_manuelle) & is_protocole_radio_filled
     df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA pour Traité 903/863 / '
     
-    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & condition_check_protocole
+    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle) & is_protocole_radio_filled
     df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
-    
+
     # ------------------------------------------------------------------
-    # NOUVELLE LOGIQUE POUR LE CONTRÔLE FP2E ET ITRON/SAPPEL
+    # LOGIQUE CORRIGÉE POUR LA NORME FP2E
     # ------------------------------------------------------------------
     
     # Condition pour appliquer la vérification FP2E
     fp2e_regex = r'^[A-Z]\d{2}[A-Z]{2}\d{6}$'
     
-    # Condition pour les compteurs ITRON / SAPPEL non manuels ou les compteurs manuels
-    fp2e_check_condition = ((is_sappel | is_itron) & (~is_mode_manuelle)) | (is_mode_manuelle)
+    sappel_itron_non_manuelle = (is_sappel | is_itron) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
+    manuelle_format_ok = (df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE') & (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
+    
+    fp2e_check_condition = sappel_itron_non_manuelle | manuelle_format_ok
     
     fp2e_results = df_with_anomalies[fp2e_check_condition].apply(check_fp2e_details, axis=1)
     
@@ -210,20 +206,11 @@ def check_data(df):
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie Détaillée FP2E'] = fp2e_results[fp2e_results != 'Conforme']
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie'] += 'non conforme FP2E / '
     
-    # ------------------------------------------------------------------
-    # NOUVELLE LOGIQUE DEMANDÉE
-    # ------------------------------------------------------------------
-    # On vérifie si le format FP2E est respecté en utilisant la regex
-    is_fp2e_compliant = df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False)
+    # NOUVELLE LOGIQUE : L'anomalie "ITRON: Compteur doit commencer par "I" ou "D"" est vérifiée
+    # UNIQUEMENT si le compteur est un ITRON et qu'il est conforme au format FP2E.
+    itron_fp2e_compliant_mask = is_itron & (~df_with_anomalies['Anomalie'].str.contains('non conforme FP2E', na=False))
+    df_with_anomalies.loc[itron_fp2e_compliant_mask & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
     
-    # On isole les cas "Manuelle" dont la marque est ITRON ou SAPPEL (H/C)
-    condition_manuelle_itron_sappel = is_mode_manuelle & (is_itron | is_sappel)
-    
-    # On applique la règle "I" ou "D" UNIQUEMENT si les conditions ci-dessus sont VRAIES ET que le format FP2E est respecté
-    condition_specifique_manuelle = condition_manuelle_itron_sappel & is_fp2e_compliant
-    
-    df_with_anomalies.loc[condition_specifique_manuelle & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'Compteur manuel: doit commencer par "I" ou "D" / '
-
     # Nettoyage de la colonne 'Anomalie'
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(' /')
     
@@ -309,9 +296,9 @@ if uploaded_file is not None:
                 "SAPPEL: Incohérence Marque/Compteur (C)": ['Numéro de compteur'],
                 "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
                 "ITRON: Tête ≠ 8 caractères": ['Numéro de tête'],
-                "Manuelle: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
-                "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité', 'Numéro de tête'],
-                "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité', 'Numéro de tête'],
+                "ITRON: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
+                "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
+                "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
             }
 
