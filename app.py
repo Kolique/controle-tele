@@ -173,13 +173,15 @@ def check_data(df):
     # ------------------------------------------------------------------
     # ANOMALIES MULTI-COLONNES (logique consolidée)
     # ------------------------------------------------------------------
-
+    # Ajout de la condition pour vérifier que Protocole Radio n'est pas vide
+    is_protocole_radio_filled = ~df_with_anomalies['Protocole Radio'].isin(['', 'nan'])
+    
     # Protocole Radio vs Traité
     traite_lra_condition = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
-    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & (~is_mode_manuelle)
+    condition_radio_lra = traite_lra_condition & (df_with_anomalies['Protocole Radio'].str.upper() != 'LRA') & (~is_mode_manuelle) & is_protocole_radio_filled
     df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA pour Traité 903/863 / '
     
-    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle)
+    condition_radio_sgx = (~traite_lra_condition) & (df_with_anomalies['Protocole Radio'].str.upper() != 'SGX') & (~is_mode_manuelle) & is_protocole_radio_filled
     df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX pour Traité non 903/863 / '
 
     # Règle de diamètre FP2E (pour SAPPEL et ITRON)
