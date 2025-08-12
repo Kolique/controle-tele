@@ -171,24 +171,23 @@ def check_data(df):
     # ITRON et DIEHL
     itron_diehl_valid = is_itron_diehl & (~df_with_anomalies['Numéro de tête'].isin(['', 'nan']))
     df_with_anomalies.loc[itron_diehl_valid & (df_with_anomalies['Numéro de tête'].str.len() != 8), 'Anomalie'] += 'ITRON/DIEHL: Tête ≠ 8 caractères / '
-    
+
     # ------------------------------------------------------------------
     # ANOMALIES MULTI-COLONNES (logique consolidée)
     # ------------------------------------------------------------------
-    # Ajout de la condition pour vérifier que Protocole Radio n'est pas vide
     is_protocole_radio_filled = ~df_with_anomalies['Protocole Radio'].isin(['', 'nan'])
-    
-    # Protocole Radio vs Traité
     traite_lra_condition = df_with_anomalies['Traité'].str.startswith(('903', '863'), na=False)
     
     # Logique corrigée pour les protocoles acceptés
-    lra_protocol_ok = df_with_anomalies['Protocole Radio'].str.upper().isin(['LRA', 'WMS'])
-    sgx_protocol_ok = df_with_anomalies['Protocole Radio'].str.upper().isin(['SGX', 'OMS', 'WMS'])
-
-    condition_radio_lra = traite_lra_condition & (~lra_protocol_ok) & (~is_mode_manuelle) & is_protocole_radio_filled
+    protocol_lra_accepted = df_with_anomalies['Protocole Radio'].str.upper().isin(['LRA', 'WMS'])
+    protocol_sgx_accepted = df_with_anomalies['Protocole Radio'].str.upper().isin(['SGX', 'OMS', 'WMS'])
+    
+    # Vérification LRA
+    condition_radio_lra = traite_lra_condition & (~protocol_lra_accepted) & (~is_mode_manuelle) & is_protocole_radio_filled
     df_with_anomalies.loc[condition_radio_lra, 'Anomalie'] += 'Protocole ≠ LRA/WMS pour Traité 903/863 / '
     
-    condition_radio_sgx = (~traite_lra_condition) & (~sgx_protocol_ok) & (~is_mode_manuelle) & is_protocole_radio_filled
+    # Vérification SGX
+    condition_radio_sgx = (~traite_lra_condition) & (~protocol_sgx_accepted) & (~is_mode_manuelle) & is_protocole_radio_filled
     df_with_anomalies.loc[condition_radio_sgx, 'Anomalie'] += 'Protocole ≠ SGX/OMS/WMS pour Traité non 903/863 / '
 
     # ------------------------------------------------------------------
@@ -198,18 +197,23 @@ def check_data(df):
     # Condition pour appliquer la vérification FP2E
     fp2e_regex = r'^[A-Z]\d{2}[A-Z]{2}\d{6}$'
     
-    sappel_itron_diehl_non_manuelle = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE')
-    manuelle_format_ok = (is_sappel | is_itron_diehl) & (df_with_anomalies['Mode de relève'].str.upper() == 'MANUELLE') & (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
-    
-    fp2e_check_condition = sappel_itron_diehl_non_manuelle | manuelle_format_ok
+    # La vérification FP2E s'applique sur toutes les marques (SAPPEL, ITRON, DIEHL)
+    # avec la nuance suivante : si le mode est 'MANUELLE', la vérification ne se lance
+    # que si le format du compteur est déjà FP2E. Sinon, elle s'applique à tous.
+    fp2e_check_condition = (is_sappel | is_itron_diehl) & (
+        (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE') |
+        (df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False))
+    )
     
     fp2e_results = df_with_anomalies[fp2e_check_condition].apply(check_fp2e_details, axis=1)
     
-    # Mise à jour des colonnes d'anomalies
     has_fp2e_anomalies = fp2e_results[fp2e_results != 'Conforme'].index
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie Détaillée FP2E'] = fp2e_results[fp2e_results != 'Conforme']
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie'] += 'non conforme FP2E / '
     
+    # Anomalie de format pour les compteurs SAPPEL non-FP2E
+    df_with_anomalies.loc[is_sappel & (~df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False)) & (df_with_anomalies['Mode de relève'].str.upper() != 'MANUELLE'), 'Anomalie'] += 'SAPPEL: Compteur format incorrect / '
+
     # NOUVELLE LOGIQUE : L'anomalie "ITRON/DIEHL: Compteur doit commencer par "I" ou "D"" est vérifiée
     # UNIQUEMENT si le compteur est un ITRON/DIEHL et qu'il n'a PAS déjà l'anomalie FP2E
     itron_diehl_fp2e_compliant_mask = is_itron_diehl & (~df_with_anomalies['Anomalie'].str.contains('non conforme FP2E', na=False))
