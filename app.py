@@ -100,7 +100,7 @@ def check_data(df):
     # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité', 'Mode de relève']
     if not all(col in df_with_anomalies.columns for col in required_columns):
-        missing = [col for col in required_with_anomalies.columns if col not in df_with_anomalies.columns]
+        missing = [col for col in required_columns if col not in df_with_anomalies.columns]
         st.error(f"Colonnes requises manquantes : {', '.join(missing)}")
         st.stop()
 
@@ -464,17 +464,17 @@ if uploaded_file is not None:
                                     except ValueError:
                                         pass
 
-                    for col in ws_anomaly_detail.columns:
-                        max_length = 0
-                        column = col[0].column
-                        for cell in col:
-                            try:
-                                if len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
-                            except:
-                                pass
-                        adjusted_width = (max_length + 2)
-                        ws_anomaly_detail.column_dimensions[get_column_letter(column)].width = adjusted_width
+                for col in ws_anomaly_detail.columns:
+                    max_length = 0
+                    column = col[0].column
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = (max_length + 2)
+                    ws_anomaly_detail.column_dimensions[get_column_letter(column)].width = adjusted_width
 
                     ws_summary.cell(row=row_num, column=1).hyperlink = f"#{sheet_name}!A1"
                     ws_summary.cell(row=row_num, column=1).font = Font(underline="single", color="0563C1")
