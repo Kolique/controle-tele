@@ -142,8 +142,11 @@ def check_data(df):
     df_with_anomalies.loc[df_with_anomalies['Diametre'].isnull(), 'Anomalie'] += 'Diamètre manquant / '
     df_with_anomalies.loc[annee_fabrication_num.isnull(), 'Anomalie'] += 'Année de fabrication manquante / '
     
-    # La condition pour Numéro de tête manquant a été mise à jour pour exclure KAIFA en Télérèléve
-    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup) & (~is_mode_manuelle) & (~(is_kaifa & is_mode_telerel))
+    # CORRECTION : La condition a été modifiée pour s'assurer que l'exclusion de KAIFA est correcte.
+    # L'anomalie est levée si le Numéro de tête est manquant ET (le mode est Télérelève ET la marque n'est PAS KAIFA)
+    # ou si la marque est autre que Kamstrup et le mode est autre que Manuel.
+    is_not_kaifa_in_telerelve = ~(is_kaifa & is_mode_telerel)
+    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup) & (~is_mode_manuelle) & is_not_kaifa_in_telerelve
     df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
     df_with_anomalies.loc[df_with_anomalies['Latitude'].isnull() | df_with_anomalies['Longitude'].isnull(), 'Anomalie'] += 'Coordonnées GPS non numériques / '
