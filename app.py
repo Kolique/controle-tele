@@ -142,11 +142,16 @@ def check_data(df):
     df_with_anomalies.loc[df_with_anomalies['Diametre'].isnull(), 'Anomalie'] += 'Diamètre manquant / '
     df_with_anomalies.loc[annee_fabrication_num.isnull(), 'Anomalie'] += 'Année de fabrication manquante / '
     
-    # CORRECTION : La condition a été modifiée pour s'assurer que l'exclusion de KAIFA est correcte.
-    # L'anomalie est levée si le Numéro de tête est manquant ET (le mode est Télérelève ET la marque n'est PAS KAIFA)
-    # ou si la marque est autre que Kamstrup et le mode est autre que Manuel.
-    is_not_kaifa_in_telerelve = ~(is_kaifa & is_mode_telerel)
-    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & (~is_kamstrup) & (~is_mode_manuelle) & is_not_kaifa_in_telerelve
+    # CORRECTION DÉFINITIVE : La condition pour Numéro de tête manquant a été mise à jour.
+    # L'anomalie est levée si le Numéro de tête est manquant
+    # ET la ligne ne correspond PAS aux exceptions suivantes :
+    # - Kamstrup
+    # - Mode Manuel
+    # - Marque KAIFA en mode Télérève
+    condition_tete_manquante = (df_with_anomalies['Numéro de tête'].isin(['', 'nan'])) & \
+                               (~is_kamstrup) & \
+                               (~is_mode_manuelle) & \
+                               (~(is_kaifa & is_mode_telerel))
     df_with_anomalies.loc[condition_tete_manquante, 'Anomalie'] += 'Numéro de tête manquant / '
 
     df_with_anomalies.loc[df_with_anomalies['Latitude'].isnull() | df_with_anomalies['Longitude'].isnull(), 'Anomalie'] += 'Coordonnées GPS non numériques / '
@@ -435,7 +440,7 @@ if uploaded_file is not None:
                     sheet_name = re.sub(r'[\\/?*\[\]:()\'"<>|]', '', sheet_name_base)
                     sheet_name = sheet_name.replace(' ', '_').replace('.', '').replace(':', '_').strip()
                     if len(sheet_name) > 31:
-                        sheet_name = sheet_name[:28]
+                        sheet_name = sheet_name[:31].rstrip('_').strip()
                     
                     original_sheet_name = sheet_name
                     counter = 1
@@ -514,7 +519,7 @@ if uploaded_file is not None:
                         adjusted_width = (max_length + 2)
                         ws_anomaly_detail.column_dimensions[get_column_letter(column)].width = adjusted_width
 
-                    ws_summary.cell(row=row_num, column=1).hyperlink = f"#{sheet_name}!A1"
+                    ws_summary.cell(row=row_num, column=1).hyperlink = f"#'{sheet_name}'!A1"
                     ws_summary.cell(row=row_num, column=1).font = Font(underline="single", color="0563C1")
                     
                 for col in ws_summary.columns:
