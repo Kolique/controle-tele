@@ -206,10 +206,19 @@ def check_data(df):
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie Détaillée FP2E'] = fp2e_results[fp2e_results != 'Conforme']
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie'] += 'non conforme FP2E / '
     
-    # NOUVELLE LOGIQUE : L'anomalie "ITRON: Compteur doit commencer par "I" ou "D"" est vérifiée
-    # UNIQUEMENT si le compteur est un ITRON et qu'il est conforme au format FP2E.
-    itron_fp2e_compliant_mask = is_itron & (~df_with_anomalies['Anomalie'].str.contains('non conforme FP2E', na=False))
-    df_with_anomalies.loc[itron_fp2e_compliant_mask & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON: Compteur doit commencer par "I" ou "D" / '
+    # ------------------------------------------------------------------
+    # LOGIQUE DEMANDÉE : La règle "I" ou "D" pour les compteurs manuels FP2E d'ITRON/SAPPEL
+    # ------------------------------------------------------------------
+    # On vérifie si le format FP2E est respecté en utilisant la regex
+    is_fp2e_compliant = df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False)
+    
+    # On isole les cas "Manuelle" dont la marque est ITRON ou SAPPEL
+    condition_manuelle_itron_sappel = is_mode_manuelle & (is_itron | is_sappel)
+    
+    # On applique la règle "I" ou "D" UNIQUEMENT si les conditions ci-dessus sont VRAIES ET que le format FP2E est respecté
+    condition_specifique_manuelle = condition_manuelle_itron_sappel & is_fp2e_compliant
+    
+    df_with_anomalies.loc[condition_specifique_manuelle & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'Compteur manuel (ITRON/SAPPEL): doit commencer par "I" ou "D" / '
     
     # Nettoyage de la colonne 'Anomalie'
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(' /')
@@ -296,7 +305,7 @@ if uploaded_file is not None:
                 "SAPPEL: Incohérence Marque/Compteur (C)": ['Numéro de compteur'],
                 "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
                 "ITRON: Tête ≠ 8 caractères": ['Numéro de tête'],
-                "ITRON: Compteur doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
+                "Compteur manuel (ITRON/SAPPEL): doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
                 "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
                 "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
