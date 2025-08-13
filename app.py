@@ -100,7 +100,7 @@ def check_data(df):
     # Vérification des colonnes requises
     required_columns = ['Protocole Radio', 'Marque', 'Numéro de compteur', 'Numéro de tête', 'Latitude', 'Longitude', 'Année de fabrication', 'Diametre', 'Traité', 'Mode de relève']
     if not all(col in df_with_anomalies.columns for col in required_columns):
-        missing = [col for col in required_columns if col not in df_with_anomalies.columns]
+        missing = [col for col in required_with_anomalies.columns if col not in df_with_anomalies.columns]
         st.error(f"Colonnes requises manquantes : {', '.join(missing)}")
         st.stop()
 
