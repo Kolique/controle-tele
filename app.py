@@ -207,19 +207,20 @@ def check_data(df):
     df_with_anomalies.loc[has_fp2e_anomalies, 'Anomalie'] += 'non conforme FP2E / '
     
     # ------------------------------------------------------------------
-    # LOGIQUE DEMANDÉE : La règle "I" ou "D" pour les compteurs manuels FP2E d'ITRON/SAPPEL
+    # LOGIQUE DEMANDÉE : La règle "I" ou "D" pour ITRON et "C" ou "H" pour SAPPEL
+    # pour les compteurs manuels FP2E
     # ------------------------------------------------------------------
     # On vérifie si le format FP2E est respecté en utilisant la regex
     is_fp2e_compliant = df_with_anomalies['Numéro de compteur'].str.match(fp2e_regex, na=False)
     
-    # On isole les cas "Manuelle" dont la marque est ITRON ou SAPPEL
-    condition_manuelle_itron_sappel = is_mode_manuelle & (is_itron | is_sappel)
+    # On applique la règle ITRON UNIQUEMENT si le mode est manuel, la marque est ITRON et le format FP2E est respecté
+    itron_manuelle_fp2e_condition = is_mode_manuelle & is_itron & is_fp2e_compliant
+    df_with_anomalies.loc[itron_manuelle_fp2e_condition & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'ITRON manuel: doit commencer par "I" ou "D" / '
     
-    # On applique la règle "I" ou "D" UNIQUEMENT si les conditions ci-dessus sont VRAIES ET que le format FP2E est respecté
-    condition_specifique_manuelle = condition_manuelle_itron_sappel & is_fp2e_compliant
-    
-    df_with_anomalies.loc[condition_specifique_manuelle & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('i', 'd'), na=False)), 'Anomalie'] += 'Compteur manuel (ITRON/SAPPEL): doit commencer par "I" ou "D" / '
-    
+    # On applique la règle SAPPEL UNIQUEMENT si le mode est manuel, la marque est SAPPEL et le format FP2E est respecté
+    sappel_manuelle_fp2e_condition = is_mode_manuelle & is_sappel & is_fp2e_compliant
+    df_with_anomalies.loc[sappel_manuelle_fp2e_condition & (~df_with_anomalies['Numéro de compteur'].str.lower().str.startswith(('c', 'h'), na=False)), 'Anomalie'] += 'SAPPEL manuel: doit commencer par "C" ou "H" / '
+
     # Nettoyage de la colonne 'Anomalie'
     df_with_anomalies['Anomalie'] = df_with_anomalies['Anomalie'].str.strip().str.rstrip(' /')
     
@@ -305,7 +306,8 @@ if uploaded_file is not None:
                 "SAPPEL: Incohérence Marque/Compteur (C)": ['Numéro de compteur'],
                 "SAPPEL: Incohérence Marque/Compteur (H)": ['Marque', 'Numéro de compteur'],
                 "ITRON: Tête ≠ 8 caractères": ['Numéro de tête'],
-                "Compteur manuel (ITRON/SAPPEL): doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
+                "ITRON manuel: doit commencer par \"I\" ou \"D\"": ['Numéro de compteur'],
+                "SAPPEL manuel: doit commencer par \"C\" ou \"H\"": ['Numéro de compteur'],
                 "Protocole ≠ LRA pour Traité 903/863": ['Protocole Radio', 'Traité'],
                 "Protocole ≠ SGX pour Traité non 903/863": ['Protocole Radio', 'Traité'],
                 "non conforme FP2E": ['Numéro de compteur', 'Diametre', 'Année de fabrication'],
